@@ -1,3 +1,6 @@
+# ECG Classification using CNN
+# Based on Roshan's work
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -69,7 +72,7 @@ def plot_waveform_by_class(record, label, save_path=None):
                 plt.title(f"Record {record}, Label {label}")
                 if save_path:
                     plt.savefig(save_path)
-                plt.close()
+                plt.show()
                 break
 
 def show_confusion_matrix(y_pred, y_true, save_path=None):
@@ -81,7 +84,7 @@ def show_confusion_matrix(y_pred, y_true, save_path=None):
     plt.title('Confusion Matrix')
     if save_path:
         plt.savefig(save_path)
-    plt.close()
+    plt.show()
 
 # Data Preparation
 data_entries = [100, 101, 103, 105, 106, 107, 108, 109, 111, 112, 113,
@@ -155,7 +158,6 @@ def plot_confusion_matrix(y_true, y_pred, title, save_path):
     plt.close()
 
 # Create confusion matrices
-os.makedirs('output_plots', exist_ok=True)
 plot_confusion_matrix(y_train, y_train_pred_classes, 'Training Confusion Matrix', 'output_plots/train_confusion_matrix.png')
 plot_confusion_matrix(y_val, y_val_pred_classes, 'Validation Confusion Matrix', 'output_plots/val_confusion_matrix.png')
 plot_confusion_matrix(y_test, y_test_pred_classes, 'Test Confusion Matrix', 'output_plots/test_confusion_matrix.png')
@@ -177,9 +179,9 @@ test_metrics = calculate_metrics(y_test, y_test_pred_classes)
 print("\nMetrics Table:")
 print("Set       | Accuracy | Precision | Recall | F1-Score")
 print("----------|----------|-----------|--------|----------")
-print(f"Training  |  {train_metrics[0]:.4f}  |  {train_metrics[1]:.4f}   |  {train_metrics[2]:.4f} | {train_metrics[3]:.4f}")
-print(f"Validation|  {val_metrics[0]:.4f}  |  {val_metrics[1]:.4f}   |  {val_metrics[2]:.4f} | {val_metrics[3]:.4f}")
-print(f"Test      |  {test_metrics[0]:.4f}  |  {test_metrics[1]:.4f}   |  {test_metrics[2]:.4f} | {test_metrics[3]:.4f}")
+print(f"Training  | {train_metrics[0]:.4f}  | {train_metrics[1]:.4f}   | {train_metrics[2]:.4f} | {train_metrics[3]:.4f}")
+print(f"Validation| {val_metrics[0]:.4f}  | {val_metrics[1]:.4f}   | {val_metrics[2]:.4f} | {val_metrics[3]:.4f}")
+print(f"Test      | {test_metrics[0]:.4f}  | {test_metrics[1]:.4f}   | {test_metrics[2]:.4f} | {test_metrics[3]:.4f}")
 
 # Plot training history
 plt.figure(figsize=(12, 4))
@@ -200,8 +202,9 @@ plt.ylabel('Loss')
 plt.legend()
 
 # Save training history plot
+os.makedirs('output_plots', exist_ok=True)
 plt.savefig('output_plots/training_history.png')
-plt.close()
+plt.show()
 
 # Example: Plot waveform for a specific class and save it
 plot_waveform_by_class(234, 'N', 'output_plots/waveform_example.png')

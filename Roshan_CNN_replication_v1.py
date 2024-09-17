@@ -1,3 +1,6 @@
+# ECG Classification using CNN
+# Based on Roshan's work
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -69,7 +72,7 @@ def plot_waveform_by_class(record, label, save_path=None):
                 plt.title(f"Record {record}, Label {label}")
                 if save_path:
                     plt.savefig(save_path)
-                plt.close()
+                plt.show()
                 break
 
 def show_confusion_matrix(y_pred, y_true, save_path=None):
@@ -81,7 +84,7 @@ def show_confusion_matrix(y_pred, y_true, save_path=None):
     plt.title('Confusion Matrix')
     if save_path:
         plt.savefig(save_path)
-    plt.close()
+    plt.show()
 
 # Data Preparation
 data_entries = [100, 101, 103, 105, 106, 107, 108, 109, 111, 112, 113,
@@ -102,13 +105,11 @@ y = np.array([data.labels for data in all_data])
 scaler = MinMaxScaler()
 X = scaler.fit_transform(X.reshape(-1, X.shape[-1])).reshape(X.shape)
 
-# Split data into training, validation, and test sets
-X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
-X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # Reshape data for CNN input
 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-X_val = X_val.reshape(X_val.shape[0], X_val.shape[1], 1)
 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
 # Define and compile model
@@ -126,60 +127,35 @@ model = keras.Sequential([
 model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
 # Train model
-history = model.fit(X_train, y_train, epochs=20, validation_data=(X_val, y_val), batch_size=32, verbose=1)
+history = model.fit(X_train, y_train, epochs=20, validation_split=0.2, batch_size=32, verbose=1)
 
 # Evaluate model
-y_train_pred = model.predict(X_train)
-y_val_pred = model.predict(X_val)
-y_test_pred = model.predict(X_test)
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
 
-y_train_pred_classes = np.argmax(y_train_pred, axis=1)
-y_val_pred_classes = np.argmax(y_val_pred, axis=1)
-y_test_pred_classes = np.argmax(y_test_pred, axis=1)
+# Get the unique classes in the test set
+unique_classes = np.unique(y_test)
 
-# Get the unique classes in all sets
-unique_classes = np.unique(np.concatenate((y_train, y_val, y_test)))
+# Create a mapping of index to label for the classes actually present in the test set
 present_labels = [num2label[i] for i in unique_classes]
 
-# Function to create confusion matrix
-def plot_confusion_matrix(y_true, y_pred, title, save_path):
-    plt.figure(figsize=(10, 8))
-    cm = confusion_matrix(y_true, y_pred)
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=present_labels, 
-                yticklabels=present_labels)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title(title)
-    plt.savefig(save_path)
-    plt.close()
+# Print evaluation metrics
+print("Evaluation Metrics:")
+print(classification_report(y_test, y_pred_classes, 
+                            target_names=present_labels, 
+                            zero_division=0))
 
-# Create confusion matrices
-os.makedirs('output_plots', exist_ok=True)
-plot_confusion_matrix(y_train, y_train_pred_classes, 'Training Confusion Matrix', 'output_plots/train_confusion_matrix.png')
-plot_confusion_matrix(y_val, y_val_pred_classes, 'Validation Confusion Matrix', 'output_plots/val_confusion_matrix.png')
-plot_confusion_matrix(y_test, y_test_pred_classes, 'Test Confusion Matrix', 'output_plots/test_confusion_matrix.png')
-
-# Function to calculate metrics
-def calculate_metrics(y_true, y_pred):
-    accuracy = accuracy_score(y_true, y_pred)
-    precision = precision_score(y_true, y_pred, average='weighted', zero_division=0)
-    recall = recall_score(y_true, y_pred, average='weighted', zero_division=0)
-    f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
-    return accuracy, precision, recall, f1
-
-# Calculate metrics for each set
-train_metrics = calculate_metrics(y_train, y_train_pred_classes)
-val_metrics = calculate_metrics(y_val, y_val_pred_classes)
-test_metrics = calculate_metrics(y_test, y_test_pred_classes)
-
-# Create a table of metrics
-print("\nMetrics Table:")
-print("Set       | Accuracy | Precision | Recall | F1-Score")
-print("----------|----------|-----------|--------|----------")
-print(f"Training  |  {train_metrics[0]:.4f}  |  {train_metrics[1]:.4f}   |  {train_metrics[2]:.4f} | {train_metrics[3]:.4f}")
-print(f"Validation|  {val_metrics[0]:.4f}  |  {val_metrics[1]:.4f}   |  {val_metrics[2]:.4f} | {val_metrics[3]:.4f}")
-print(f"Test      |  {test_metrics[0]:.4f}  |  {test_metrics[1]:.4f}   |  {test_metrics[2]:.4f} | {test_metrics[3]:.4f}")
+# Update confusion matrix plotting
+plt.figure(figsize=(10, 8))
+cm = confusion_matrix(y_test, y_pred_classes)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+            xticklabels=present_labels, 
+            yticklabels=present_labels)
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Confusion Matrix')
+plt.savefig('output_plots/confusion_matrix.png')
+plt.show()
 
 # Plot training history
 plt.figure(figsize=(12, 4))
@@ -200,8 +176,9 @@ plt.ylabel('Loss')
 plt.legend()
 
 # Save training history plot
+os.makedirs('output_plots', exist_ok=True)
 plt.savefig('output_plots/training_history.png')
-plt.close()
+plt.show()
 
 # Example: Plot waveform for a specific class and save it
 plot_waveform_by_class(234, 'N', 'output_plots/waveform_example.png')
