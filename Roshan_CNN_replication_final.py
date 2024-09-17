@@ -177,9 +177,9 @@ test_metrics = calculate_metrics(y_test, y_test_pred_classes)
 print("\nMetrics Table:")
 print("Set       | Accuracy | Precision | Recall | F1-Score")
 print("----------|----------|-----------|--------|----------")
-print(f"Training  |  {train_metrics[0]:.4f}  |  {train_metrics[1]:.4f}   |  {train_metrics[2]:.4f} | {train_metrics[3]:.4f}")
-print(f"Validation|  {val_metrics[0]:.4f}  |  {val_metrics[1]:.4f}   |  {val_metrics[2]:.4f} | {val_metrics[3]:.4f}")
-print(f"Test      |  {test_metrics[0]:.4f}  |  {test_metrics[1]:.4f}   |  {test_metrics[2]:.4f} | {test_metrics[3]:.4f}")
+print(f"Training  |  {train_metrics[0]:.4f}  |  {train_metrics[1]:.4f}   | {train_metrics[2]:.4f} | {train_metrics[3]:.4f}")
+print(f"Validation|  {val_metrics[0]:.4f}  |  {val_metrics[1]:.4f}   | {val_metrics[2]:.4f} | {val_metrics[3]:.4f}")
+print(f"Test      |  {test_metrics[0]:.4f}  |  {test_metrics[1]:.4f}   | {test_metrics[2]:.4f} | {test_metrics[3]:.4f}")
 
 # Plot training history
 plt.figure(figsize=(12, 4))
