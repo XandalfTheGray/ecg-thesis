@@ -14,69 +14,54 @@ class ECG_reading:
         self.labels = labels      # The labels for each heartbeat
 
 # Process a record and perform signal preprocessing
-def processRecord(recordNum, database_path):
-    """
-    Processes a record and performs signal preprocessing.
+def processRecord(record, database_path):
+    # Construct the full path to the record
+    record_path = os.path.join(database_path, record)
+    
+    print(f"Attempting to process record: {record}")
+    print(f"Full path: {record_path}")
+    
+    try:
+        # Read the record
+        record_data = wfdb.rdrecord(record_path)
+        
+        # Extract the signal data
+        signal = record_data.p_signal
+        
+        # Try to read annotations
+        try:
+            ann = wfdb.rdann(record_path, 'atr')
+            rPeaks = ann.sample
+            labels = ann.symbol
+        except Exception as e:
+            print(f"Error reading annotations for {record}: {str(e)}")
+            rPeaks = None
+            labels = None
+        
+        # Create an ECG_reading object
+        ecg_reading = ECG_reading(record, signal, rPeaks, labels)
 
-    Parameters:
-    - recordNum: int, the record number in the MIT-BIH database.
-    - database_path: str, the path to the MIT-BIH database.
-
-    Returns:
-    - ECG_reading object containing the processed signal, rPeaks, and labels.
-    """
-    samplingRate = 360          # Sampling Rate of the MIT-BIH Database
-
-    # Grab MLII readings. Easier to view Normal Beats with these readings
-    rawSignal = wfdb.rdrecord(record_name = os.path.join(database_path, str(recordNum)), channels = [0]).p_signal[:,0]
-    # Also, grab the corresponding annotations (labels and rPeaks)
-    signalAnnotations = wfdb.rdann(record_name = os.path.join(database_path, str(recordNum)),extension = 'atr')
-
-    # Grab the rPeaks and the labels from the annotations
-    rPeaks = signalAnnotations.sample
-    labels = signalAnnotations.symbol
-
-    # Setup a high-pass filter to remove baseline wander
-    order = 2                   # Higher order not necessarily needed
-    f0 = 0.5                    # Cut-off frequency
-    b, a = scipy.signal.butter(N = order, Wn = f0,
-                               btype = 'highpass',
-                               fs = samplingRate)
-    retSignal = scipy.signal.filtfilt(b, a, rawSignal)   # Apply HP Filter
-
-    # Setup and Apply a 60Hz notch filter to remove powerline hum
-    # Second order, quality factor of 10
-    f0 = 60
-    b, a = scipy.signal.iirnotch(w0 = f0, Q = 10, fs = samplingRate)
-    retSignal = scipy.signal.filtfilt(b, a, retSignal)    # Apply Notch
-
-    # Normalize Signal
-    retSignal = retSignal.reshape(len(retSignal),1)
-    scaler = MinMaxScaler()
-    scaledSignal = scaler.fit_transform(retSignal)
-    scaledSignal = scaledSignal.reshape(len(retSignal))
-
-    return ECG_reading(recordNum, scaledSignal, rPeaks, labels)
+        print(f"Successfully processed record: {record}")
+        return ecg_reading
+    except FileNotFoundError:
+        print(f"File not found: {record_path}")
+        return None
+    except Exception as e:
+        print(f"Error processing record {record}: {str(e)}")
+        return None
 
 # Segment the signal into individual heartbeats
 def segmentSignal(record, valid_labels, label2Num):
-    """
-    Segments the signal into individual heartbeats.
-
-    Parameters:
-    - record: ECG_reading object containing the processed signal, rPeaks, and labels.
-    - valid_labels: list, the list of valid labels to segment.
-    - label2Num: dict, the dictionary mapping labels to numbers.
-
-    Returns:
-    - newSignal: list, the segmented signal.
-    - cl_Labels: list, the labels for each heartbeat.
-    - classes: list, the class labels.
-    """
     # First grab rPeaks, labels, and the signal itself from the record
     labels = record.labels
-    rPeaks = np.array(record.rPeaks)
+    rPeaks = record.rPeaks
     signal = record.signal
+
+    if labels is None or rPeaks is None:
+        print(f"Labels or rPeaks are None for record: {record.record}")
+        return [], [], []
+
+    rPeaks = np.array(rPeaks)
 
     # How many samples to grab before and after the QRS complex.
     preBuffer = 150

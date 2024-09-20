@@ -1,130 +1,235 @@
 # models.py
 
 from keras import layers, models
+from keras.regularizers import l2
 
-def build_cnn(input_shape, num_classes):
+def build_cnn(input_shape, num_classes, filters=(32, 64, 128), kernel_sizes=(3, 3, 3),
+             dropout_rates=(0.2, 0.2, 0.2, 0.5), l2_reg=0.001):
     """
-    Builds and returns a Convolutional Neural Network (CNN) model.
+    Builds a Convolutional Neural Network (CNN) with customizable parameters.
 
     Parameters:
-    - input_shape: tuple, the shape of the input data (timesteps, features)
-    - num_classes: int, the number of output classes
+    - input_shape (tuple): Shape of the input data (timesteps, features).
+    - num_classes (int): Number of output classes.
+    - filters (tuple): Number of filters for each Conv block.
+    - kernel_sizes (tuple): Kernel sizes for each Conv block.
+    - dropout_rates (tuple): Dropout rates for each Dropout layer.
+    - l2_reg (float): L2 regularization factor.
 
     Returns:
-    - model: Keras Model object
+    - model (keras.Model): Compiled CNN model.
     """
     model = models.Sequential()
-    # Block 1
-    model.add(layers.Conv1D(filters=32,
-                            kernel_size=3,
-                            input_shape=input_shape,
-                            activation='relu',
-                            padding='same'))
-    model.add(layers.Conv1D(filters=32,
-                            kernel_size=3,
-                            activation='relu',
-                            padding='same'))
-    model.add(layers.MaxPooling1D(pool_size=3))
-    model.add(layers.Dropout(0.1))
-
-    # Block 2
-    model.add(layers.Conv1D(filters=64,
-                            kernel_size=3,
-                            activation='relu',
-                            padding='same'))
-    model.add(layers.Conv1D(filters=64,
-                            kernel_size=3,
-                            activation='relu',
-                            padding='same'))
-    model.add(layers.MaxPooling1D(pool_size=2))
-    model.add(layers.Dropout(0.1))
-
-    # Block 3
-    model.add(layers.Conv1D(filters=128,
-                            kernel_size=3,
-                            activation='relu',
-                            padding='same'))
-    model.add(layers.Conv1D(filters=128,
-                            kernel_size=3,
-                            activation='relu',
-                            padding='same'))
-    model.add(layers.MaxPooling1D(pool_size=5))
-
+    for i in range(len(filters)):
+        model.add(layers.Conv1D(filters=filters[i],
+                                kernel_size=kernel_sizes[i],
+                                activation='relu',
+                                padding='same',
+                                kernel_regularizer=l2(l2_reg),
+                                input_shape=input_shape if i == 0 else None))
+        model.add(layers.Conv1D(filters=filters[i],
+                                kernel_size=kernel_sizes[i],
+                                activation='relu',
+                                padding='same',
+                                kernel_regularizer=l2(l2_reg)))
+        pool_size = 3 if i == 0 else 2 if i == 1 else 5
+        model.add(layers.MaxPooling1D(pool_size=pool_size))
+        model.add(layers.Dropout(dropout_rates[i]))
     model.add(layers.Flatten())
-    model.add(layers.Dense(64, activation='relu'))
+    model.add(layers.Dense(64, activation='relu', kernel_regularizer=l2(l2_reg)))
+    model.add(layers.Dropout(dropout_rates[-1]))
     model.add(layers.Dense(num_classes, activation='softmax'))
-
     return model
 
-def residual_block(x, filters, kernel_size=3, stride=1):
+def conv_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
     """
-    A standard residual block for 1D ResNet.
+    Basic residual block for ResNet18 and ResNet34.
 
     Parameters:
-    - x: input tensor
-    - filters: int, number of filters for the convolutional layers
-    - kernel_size: int, size of the convolutional kernel
-    - stride: int, stride for the convolution
+    - x (tensor): Input tensor.
+    - filters (int): Number of filters.
+    - kernel_size (int): Kernel size for Conv layers.
+    - stride (int): Stride for the first Conv layer.
+    - l2_reg (float): L2 regularization factor.
 
     Returns:
-    - output tensor for the block
+    - tensor: Output tensor after applying the residual block.
     """
     shortcut = x
 
-    # First convolutional layer
-    x = layers.Conv1D(filters, kernel_size, strides=stride, padding='same')(x)
+    x = layers.Conv1D(filters, kernel_size, strides=stride, padding='same',
+                      kernel_regularizer=l2(l2_reg))(x)
     x = layers.BatchNormalization()(x)
     x = layers.Activation('relu')(x)
 
-    # Second convolutional layer
-    x = layers.Conv1D(filters, kernel_size, strides=1, padding='same')(x)
+    x = layers.Conv1D(filters, kernel_size, strides=1, padding='same',
+                      kernel_regularizer=l2(l2_reg))(x)
     x = layers.BatchNormalization()(x)
 
-    # Adjust the shortcut if necessary
     if stride != 1 or shortcut.shape[-1] != filters:
-        shortcut = layers.Conv1D(filters, 1, strides=stride, padding='same')(shortcut)
+        shortcut = layers.Conv1D(filters, 1, strides=stride, padding='same',
+                                 kernel_regularizer=l2(l2_reg))(shortcut)
         shortcut = layers.BatchNormalization()(shortcut)
 
-    # Add the shortcut to the main path
     x = layers.add([shortcut, x])
     x = layers.Activation('relu')(x)
-
     return x
 
-def build_resnet1d(input_shape, num_classes):
+def bottleneck_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
     """
-    Builds and returns a 1D ResNet model.
+    Bottleneck residual block for ResNet50.
 
     Parameters:
-    - input_shape: tuple, the shape of the input data (timesteps, features)
-    - num_classes: int, the number of output classes
+    - x (tensor): Input tensor.
+    - filters (int): Number of filters for the first two Conv layers.
+    - kernel_size (int): Kernel size for the middle Conv layer.
+    - stride (int): Stride for the first Conv layer.
+    - l2_reg (float): L2 regularization factor.
 
     Returns:
-    - model: Keras Model object
+    - tensor: Output tensor after applying the bottleneck block.
+    """
+    shortcut = x
+
+    # 1x1 Conv
+    x = layers.Conv1D(filters, 1, strides=stride, padding='same',
+                      kernel_regularizer=l2(l2_reg))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+
+    # 3x3 Conv
+    x = layers.Conv1D(filters, kernel_size, strides=1, padding='same',
+                      kernel_regularizer=l2(l2_reg))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+
+    # 1x1 Conv
+    x = layers.Conv1D(filters * 4, 1, strides=1, padding='same',
+                      kernel_regularizer=l2(l2_reg))(x)
+    x = layers.BatchNormalization()(x)
+
+    if stride != 1 or shortcut.shape[-1] != filters * 4:
+        shortcut = layers.Conv1D(filters * 4, 1, strides=stride, padding='same',
+                                 kernel_regularizer=l2(l2_reg))(shortcut)
+        shortcut = layers.BatchNormalization()(shortcut)
+
+    x = layers.add([shortcut, x])
+    x = layers.Activation('relu')(x)
+    return x
+
+def build_resnet18_1d(input_shape, num_classes, l2_reg=0.001):
+    """
+    Builds ResNet18 architecture for 1D data.
+
+    Parameters:
+    - input_shape (tuple): Shape of the input data (timesteps, features).
+    - num_classes (int): Number of output classes.
+    - l2_reg (float): L2 regularization factor.
+
+    Returns:
+    - model (keras.Model): Compiled ResNet18 model.
     """
     inputs = layers.Input(shape=input_shape)
-    x = layers.Conv1D(64, 7, strides=2, padding='same')(inputs)
+    x = layers.Conv1D(64, 7, strides=2, padding='same',
+                      kernel_regularizer=l2(l2_reg))(inputs)
     x = layers.BatchNormalization()(x)
     x = layers.Activation('relu')(x)
     x = layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(x)
 
-    # Residual blocks
-    x = residual_block(x, filters=64)
-    x = residual_block(x, filters=64)
+    for _ in range(2):
+        x = conv_block(x, filters=64, l2_reg=l2_reg)
 
-    x = residual_block(x, filters=128, stride=2)
-    x = residual_block(x, filters=128)
+    for _ in range(2):
+        stride = 2 if _ == 0 else 1
+        x = conv_block(x, filters=128, stride=stride, l2_reg=l2_reg)
 
-    x = residual_block(x, filters=256, stride=2)
-    x = residual_block(x, filters=256)
+    for _ in range(2):
+        stride = 2 if _ == 0 else 1
+        x = conv_block(x, filters=256, stride=stride, l2_reg=l2_reg)
 
-    x = residual_block(x, filters=512, stride=2)
-    x = residual_block(x, filters=512)
+    for _ in range(2):
+        stride = 2 if _ == 0 else 1
+        x = conv_block(x, filters=512, stride=stride, l2_reg=l2_reg)
 
-    # Global average pooling and output
     x = layers.GlobalAveragePooling1D()(x)
     outputs = layers.Dense(num_classes, activation='softmax')(x)
+    model = models.Model(inputs, outputs)
+    return model
 
-    model = models.Model(inputs=inputs, outputs=outputs)
+def build_resnet34_1d(input_shape, num_classes, l2_reg=0.001):
+    """
+    Builds ResNet34 architecture for 1D data.
 
+    Parameters:
+    - input_shape (tuple): Shape of the input data (timesteps, features).
+    - num_classes (int): Number of output classes.
+    - l2_reg (float): L2 regularization factor.
+
+    Returns:
+    - model (keras.Model): Compiled ResNet34 model.
+    """
+    inputs = layers.Input(shape=input_shape)
+    x = layers.Conv1D(64, 7, strides=2, padding='same',
+                      kernel_regularizer=l2(l2_reg))(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(x)
+
+    for _ in range(3):
+        x = conv_block(x, filters=64, l2_reg=l2_reg)
+
+    for _ in range(4):
+        stride = 2 if _ == 0 else 1
+        x = conv_block(x, filters=128, stride=stride, l2_reg=l2_reg)
+
+    for _ in range(6):
+        stride = 2 if _ == 0 else 1
+        x = conv_block(x, filters=256, stride=stride, l2_reg=l2_reg)
+
+    for _ in range(3):
+        stride = 2 if _ == 0 else 1
+        x = conv_block(x, filters=512, stride=stride, l2_reg=l2_reg)
+
+    x = layers.GlobalAveragePooling1D()(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    model = models.Model(inputs, outputs)
+    return model
+
+def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001):
+    """
+    Builds ResNet50 architecture for 1D data.
+
+    Parameters:
+    - input_shape (tuple): Shape of the input data (timesteps, features).
+    - num_classes (int): Number of output classes.
+    - l2_reg (float): L2 regularization factor.
+
+    Returns:
+    - model (keras.Model): Compiled ResNet50 model.
+    """
+    inputs = layers.Input(shape=input_shape)
+    x = layers.Conv1D(64, 7, strides=2, padding='same',
+                      kernel_regularizer=l2(l2_reg))(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(x)
+
+    for _ in range(3):
+        x = bottleneck_block(x, filters=64, l2_reg=l2_reg)
+
+    for _ in range(4):
+        stride = 2 if _ == 0 else 1
+        x = bottleneck_block(x, filters=128, stride=stride, l2_reg=l2_reg)
+
+    for _ in range(6):
+        stride = 2 if _ == 0 else 1
+        x = bottleneck_block(x, filters=256, stride=stride, l2_reg=l2_reg)
+
+    for _ in range(3):
+        stride = 2 if _ == 0 else 1
+        x = bottleneck_block(x, filters=512, stride=stride, l2_reg=l2_reg)
+
+    x = layers.GlobalAveragePooling1D()(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    model = models.Model(inputs, outputs)
     return model
