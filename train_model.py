@@ -9,6 +9,7 @@ from sklearn.utils import class_weight
 from tensorflow import keras
 import wfdb
 import sys
+from datetime import datetime
 
 # Import models and evaluation
 from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
@@ -20,16 +21,16 @@ from csn_ecg_data_preprocessing import load_data as load_csn_data
 
 def main():
     # Setup
-    output_dir = 'output_plots'
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Select Dataset
+    base_output_dir = 'output_plots'
     dataset_name = 'mitbih'  # 'mitbih' or 'csn_ecg'
-
-    # Select Model & Parameters
     model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
 
-    # Good CNN Params
+    # Create a unique directory name with dataset, model, and datetime
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{current_time}")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Select Model & Parameters
     model_params = {
         'l2_reg': 0.001,                        # Regularization factor
         'filters': (32, 64, 128),                # Reduced number of filters
@@ -158,6 +159,14 @@ def main():
         plt.legend()
         plt.savefig(os.path.join(output_dir, f'{metric}.png'))
         plt.close()
+
+    # Save model parameters to a text file
+    with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
+        f.write(f"Dataset: {dataset_name}\n")
+        f.write(f"Model Type: {model_type}\n")
+        f.write("Model Parameters:\n")
+        for key, value in model_params.items():
+            f.write(f"  {key}: {value}\n")
 
 if __name__ == '__main__':
     main()
