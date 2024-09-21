@@ -22,7 +22,7 @@ from csn_ecg_data_preprocessing import load_data as load_csn_data
 def main():
     # Setup
     base_output_dir = 'output_plots'
-    dataset_name = 'mitbih'  # 'mitbih' or 'csn_ecg'
+    dataset_name = 'csn_ecg'  # 'mitbih' or 'csn_ecg'
     model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
 
     # Create a unique directory name with dataset, model, and datetime
@@ -57,7 +57,20 @@ def main():
                         '222', '223', '228', '230', '231', '232', '233', '234']
         valid_labels = ['N', 'V', 'A', 'R', 'L', '/']
         database_path = 'mit-bih-arrhythmia-database/mit-bih-arrhythmia-database-1.0.0/'
+        
+        X, Y_cl = [], []
+        for record in data_entries:
+            ecg_reading = processRecord(record, database_path)
+            if ecg_reading is not None:
+                segments, labels, _ = segmentSignal(ecg_reading, valid_labels, label2Num)
+                X.extend(segments)
+                Y_cl.extend(labels)
+        X, Y_cl = np.array(X), np.array(Y_cl)
+        
     elif dataset_name == 'csn_ecg':
+        database_path = 'a-large-scale-ecg-database-1.0.0/a-large-scale-ecg-database-1.0.0/'
+        valid_labels = ['SR', 'AFIB', 'AT', 'PVC', 'RBBB', 'LBBB', 'APB']
+        
         wfdb_dir = os.path.join(database_path, 'WFDBRecords')
         data_entries = []
         
@@ -70,26 +83,14 @@ def main():
                     record_name = os.path.splitext(os.path.relpath(record_path, database_path))[0]
                     data_entries.append(record_name)
         
-        valid_labels = ['SR', 'AFIB', 'AT', 'PVC', 'RBBB', 'LBBB', 'APB']
-        database_path = 'a-large-scale-ecg-database-1.0.0/a-large-scale-ecg-database-1.0.0/'
+        # Set the maximum number of records to load for testing
+        max_records = 10  # Adjust this number as needed for your test
+        X, Y_cl = load_csn_data(database_path, data_entries, valid_labels, label2Num, max_records=max_records)
     else:
         raise ValueError("Unsupported dataset.")
 
     label2Num = {label: idx for idx, label in enumerate(valid_labels)}
     Num2Label = {idx: label for idx, label in enumerate(valid_labels)}
-
-    # Load and preprocess data
-    if dataset_name == 'mitbih':
-        X, Y_cl = [], []
-        for record in data_entries:
-            ecg_reading = processRecord(record, database_path)
-            if ecg_reading is not None:
-                segments, labels, _ = segmentSignal(ecg_reading, valid_labels, label2Num)
-                X.extend(segments)
-                Y_cl.extend(labels)
-        X, Y_cl = np.array(X), np.array(Y_cl)
-    elif dataset_name == 'csn_ecg':
-        X, Y_cl = load_csn_data(database_path, data_entries, valid_labels, label2Num)
 
     if len(X) == 0 or len(Y_cl) == 0:
         print("Error: No data loaded. Check the data loading process.", file=sys.stderr)

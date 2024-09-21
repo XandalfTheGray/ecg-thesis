@@ -3,9 +3,16 @@
 import wfdb
 import numpy as np
 import os
+import random
 
-def load_data(database_path, data_entries, valid_labels, label2Num):
+def load_data(database_path, data_entries, valid_labels, label2Num, max_records=None):
     X, Y_cl = [], []
+    
+    # Optionally limit the number of records
+    if max_records is not None:
+        # random.seed(42) #if we want consistent results
+        data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
+    
     for record in data_entries:
         record_path = os.path.join(database_path, record)
         try:
