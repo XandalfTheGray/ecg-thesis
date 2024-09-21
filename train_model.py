@@ -27,7 +27,7 @@ def main():
     dataset_name = 'mitbih'  # 'mitbih' or 'csn_ecg'
 
     # Select Model & Parameters
-    model_type = 'resnet18' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
+    model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
     model_params = {
         'l2_reg': 0.001,
         'filters': (64, 128, 256, 512),

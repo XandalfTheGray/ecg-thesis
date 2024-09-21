@@ -1,18 +1,18 @@
 # models.py
 
-from keras import layers, models
+from keras import layers, models, Input, Model, regularizers
 from keras.regularizers import l2
 
 def build_cnn(input_shape, num_classes, filters, kernel_sizes, dropout_rates, l2_reg=0.001):
-    inputs = keras.Input(shape=input_shape)
+    inputs = Input(shape=input_shape)
     x = inputs
     for f, k, d in zip(filters, kernel_sizes, dropout_rates):
-        x = keras.layers.Conv1D(filters=f, kernel_size=k, activation='relu', padding='same', kernel_regularizer=keras.regularizers.l2(l2_reg))(x)
-        x = keras.layers.BatchNormalization()(x)
-        x = keras.layers.Dropout(d)(x)
-    x = keras.layers.GlobalAveragePooling1D()(x)
-    outputs = keras.layers.Dense(num_classes, activation='softmax')(x)
-    return keras.Model(inputs, outputs)
+        x = layers.Conv1D(filters=f, kernel_size=k, activation='relu', padding='same', kernel_regularizer=regularizers.l2(l2_reg))(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(d)(x)
+    x = layers.GlobalAveragePooling1D()(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    return Model(inputs, outputs)
 
 def conv_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
     """
