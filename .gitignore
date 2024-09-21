@@ -176,5 +176,5 @@ output_plots/
 output_plots_roshancnn/
 
 # helper functions
-extract_record_names.py
+extract_record_structure.py
 text_files.py
