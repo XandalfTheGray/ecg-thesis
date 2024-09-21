@@ -22,7 +22,7 @@ from csn_ecg_data_preprocessing import load_data as load_csn_data
 def main():
     # Setup
     base_output_dir = 'output_plots'
-    dataset_name = 'csn_ecg'  # 'mitbih' or 'csn_ecg'
+    dataset_name = 'mitbih'  # 'mitbih' or 'csn_ecg'
     model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
 
     # Create a unique directory name with dataset, model, and datetime
@@ -57,7 +57,9 @@ def main():
                         '222', '223', '228', '230', '231', '232', '233', '234']
         valid_labels = ['N', 'V', 'A', 'R', 'L', '/']
         database_path = 'mit-bih-arrhythmia-database/mit-bih-arrhythmia-database-1.0.0/'
-        
+
+        label2Num = {label: idx for idx, label in enumerate(valid_labels)}
+        print(f"Processing {len(data_entries)} records for MITBIH dataset")
         X, Y_cl = [], []
         for record in data_entries:
             ecg_reading = processRecord(record, database_path)
@@ -65,31 +67,51 @@ def main():
                 segments, labels, _ = segmentSignal(ecg_reading, valid_labels, label2Num)
                 X.extend(segments)
                 Y_cl.extend(labels)
+            else:
+                print(f"Warning: No data for record {record}")
         X, Y_cl = np.array(X), np.array(Y_cl)
         
     elif dataset_name == 'csn_ecg':
-        database_path = 'a-large-scale-ecg-database-1.0.0/a-large-scale-ecg-database-1.0.0/'
+        database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
         valid_labels = ['SR', 'AFIB', 'AT', 'PVC', 'RBBB', 'LBBB', 'APB']
         
-        wfdb_dir = os.path.join(database_path, 'WFDBRecords')
-        data_entries = []
+        # Define label2Num here for CSN ECG
+        label2Num = {label: idx for idx, label in enumerate(valid_labels)}
         
+        wfdb_dir = os.path.join(database_path, 'WFDBRecords')
+        
+        if not os.path.exists(wfdb_dir):
+            print(f"Error: Directory {wfdb_dir} does not exist.")
+            return
+
+        data_entries = []
+
         # Traverse the WFDBRecords directory to gather all record names
         for subdir, dirs, files in os.walk(wfdb_dir):
             for file in files:
-                if file.endswith('.hea'):
-                    # Get the relative path without the file extension
+                if file.endswith('.mat'):
                     record_path = os.path.join(subdir, file)
-                    record_name = os.path.splitext(os.path.relpath(record_path, database_path))[0]
+                    record_name = os.path.relpath(record_path, wfdb_dir)
+                    record_name = os.path.splitext(record_name)[0]  # Remove the .mat extension
                     data_entries.append(record_name)
+
+        print(f"Total records found for CSN ECG: {len(data_entries)}")
         
+        if len(data_entries) == 0:
+            print("Error: No records found. Check the database path and file structure.")
+            return
+
         # Set the maximum number of records to load for testing
-        max_records = 10  # Adjust this number as needed for your test
-        X, Y_cl = load_csn_data(database_path, data_entries, valid_labels, label2Num, max_records=max_records)
+        max_records = 10  # Adjust as needed
+        print(f"Processing up to {max_records} records for CSN ECG dataset")
+        X, Y_cl = load_csn_data(wfdb_dir, data_entries, valid_labels, label2Num, max_records=max_records)
+    
     else:
         raise ValueError("Unsupported dataset.")
+    
+    print(f"Loaded data shape - X: {np.array(X).shape}, Y_cl: {np.array(Y_cl).shape}")
 
-    label2Num = {label: idx for idx, label in enumerate(valid_labels)}
+    # Move this line after the if-elif block
     Num2Label = {idx: label for idx, label in enumerate(valid_labels)}
 
     if len(X) == 0 or len(Y_cl) == 0:
