@@ -3,43 +3,16 @@
 from keras import layers, models
 from keras.regularizers import l2
 
-def build_cnn(input_shape, num_classes, filters=(32, 64, 128), kernel_sizes=(3, 3, 3),
-             dropout_rates=(0.2, 0.2, 0.2, 0.5), l2_reg=0.001):
-    """
-    Builds a Convolutional Neural Network (CNN) with customizable parameters.
-
-    Parameters:
-    - input_shape (tuple): Shape of the input data (timesteps, features).
-    - num_classes (int): Number of output classes.
-    - filters (tuple): Number of filters for each Conv block.
-    - kernel_sizes (tuple): Kernel sizes for each Conv block.
-    - dropout_rates (tuple): Dropout rates for each Dropout layer.
-    - l2_reg (float): L2 regularization factor.
-
-    Returns:
-    - model (keras.Model): Compiled CNN model.
-    """
-    model = models.Sequential()
-    for i in range(len(filters)):
-        model.add(layers.Conv1D(filters=filters[i],
-                                kernel_size=kernel_sizes[i],
-                                activation='relu',
-                                padding='same',
-                                kernel_regularizer=l2(l2_reg),
-                                input_shape=input_shape if i == 0 else None))
-        model.add(layers.Conv1D(filters=filters[i],
-                                kernel_size=kernel_sizes[i],
-                                activation='relu',
-                                padding='same',
-                                kernel_regularizer=l2(l2_reg)))
-        pool_size = 3 if i == 0 else 2 if i == 1 else 5
-        model.add(layers.MaxPooling1D(pool_size=pool_size))
-        model.add(layers.Dropout(dropout_rates[i]))
-    model.add(layers.Flatten())
-    model.add(layers.Dense(64, activation='relu', kernel_regularizer=l2(l2_reg)))
-    model.add(layers.Dropout(dropout_rates[-1]))
-    model.add(layers.Dense(num_classes, activation='softmax'))
-    return model
+def build_cnn(input_shape, num_classes, filters, kernel_sizes, dropout_rates, l2_reg=0.001):
+    inputs = keras.Input(shape=input_shape)
+    x = inputs
+    for f, k, d in zip(filters, kernel_sizes, dropout_rates):
+        x = keras.layers.Conv1D(filters=f, kernel_size=k, activation='relu', padding='same', kernel_regularizer=keras.regularizers.l2(l2_reg))(x)
+        x = keras.layers.BatchNormalization()(x)
+        x = keras.layers.Dropout(d)(x)
+    x = keras.layers.GlobalAveragePooling1D()(x)
+    outputs = keras.layers.Dense(num_classes, activation='softmax')(x)
+    return keras.Model(inputs, outputs)
 
 def conv_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
     """

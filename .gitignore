@@ -165,6 +165,7 @@ cython_debug/
 resources/
 
 # datasets, zip and unzipped files
+database_zip_files/
 a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0.zip
 a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/
 mit-bih-arrhythmia-database-1.0.0.zip
@@ -173,5 +174,3 @@ mit-bih-arrhythmia-database/
 # output plots
 output_plots/
 output_plots_roshancnn/
-
-
