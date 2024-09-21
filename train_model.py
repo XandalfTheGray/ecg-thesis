@@ -28,12 +28,25 @@ def main():
 
     # Select Model & Parameters
     model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
+
+    # Good CNN Params
+    model_params = {
+        'l2_reg': 0.001,                        # Regularization factor
+        'filters': (32, 64, 128),                # Reduced number of filters
+        'kernel_sizes': (3, 3, 3),              # Consistent kernel sizes
+        'dropout_rates': (0.1, 0.1, 0.1, 0.5)    # Lower dropout rates
+    }
+  
+    
+    """
+    # Good Resnet18 Params
     model_params = {
         'l2_reg': 0.001,
         'filters': (64, 128, 256, 512),
         'kernel_sizes': (3, 3, 3, 3),
         'dropout_rates': (0.3, 0.3, 0.3, 0.6)
     }
+    """
     
     # Define data entries and labels
     if dataset_name == 'mitbih':

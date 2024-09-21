@@ -1,18 +1,40 @@
 # models.py
-
-from keras import layers, models, Input, Model, regularizers
+from keras import layers, models
 from keras.regularizers import l2
+from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization
 
 def build_cnn(input_shape, num_classes, filters, kernel_sizes, dropout_rates, l2_reg=0.001):
+    """
+    Builds a Convolutional Neural Network (CNN) with two Conv1D layers per block and MaxPooling.
+    """
     inputs = Input(shape=input_shape)
     x = inputs
-    for f, k, d in zip(filters, kernel_sizes, dropout_rates):
-        x = layers.Conv1D(filters=f, kernel_size=k, activation='relu', padding='same', kernel_regularizer=regularizers.l2(l2_reg))(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.Dropout(d)(x)
-    x = layers.GlobalAveragePooling1D()(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
-    return Model(inputs, outputs)
+    for i in range(len(filters)):
+        # First Conv1D layer
+        x = Conv1D(filters=filters[i],
+                   kernel_size=kernel_sizes[i],
+                   activation='relu',
+                   padding='same',
+                   kernel_regularizer=l2(l2_reg))(x)
+        # Second Conv1D layer
+        x = Conv1D(filters=filters[i],
+                   kernel_size=kernel_sizes[i],
+                   activation='relu',
+                   padding='same',
+                   kernel_regularizer=l2(l2_reg))(x)
+        # MaxPooling
+        pool_size = 3 if filters[i] == 32 else 2 if filters[i] == 64 else 5
+        x = MaxPooling1D(pool_size=pool_size)(x)
+        # Dropout
+        x = Dropout(dropout_rates[i])(x)
+    
+    x = Flatten()(x)
+    x = Dense(64, activation='relu', kernel_regularizer=l2(l2_reg))(x)
+    x = Dropout(dropout_rates[-1])(x)
+    outputs = Dense(num_classes, activation='softmax')(x)
+    
+    model = models.Model(inputs, outputs)
+    return model
 
 def conv_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
     """

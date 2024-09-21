@@ -18,9 +18,6 @@ def processRecord(record, database_path):
     # Construct the full path to the record
     record_path = os.path.join(database_path, record)
     
-    print(f"Attempting to process record: {record}")
-    print(f"Full path: {record_path}")
-    
     try:
         # Read the record
         record_data = wfdb.rdrecord(record_path)
@@ -41,7 +38,6 @@ def processRecord(record, database_path):
         # Create an ECG_reading object
         ecg_reading = ECG_reading(record, signal, rPeaks, labels)
 
-        print(f"Successfully processed record: {record}")
         return ecg_reading
     except FileNotFoundError:
         print(f"File not found: {record_path}")
