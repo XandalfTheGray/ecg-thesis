@@ -174,3 +174,7 @@ mit-bih-arrhythmia-database/
 # output plots
 output_plots/
 output_plots_roshancnn/
+
+# helper functions
+extract_record_names.py
+text_files.py
