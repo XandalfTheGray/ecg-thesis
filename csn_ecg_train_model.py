@@ -1,4 +1,4 @@
-# csn_ecg_train_model.py
+# File: csn_ecg_train_model.py
 # This script trains a neural network model on the preprocessed CSN ECG dataset
 
 import os
@@ -82,17 +82,6 @@ def main():
     for code in unknown_codes:
         snomed_ct_mapping[code] = f"Unknown_{code}"
 
-    # Create label mappings
-    unique_labels = np.unique(Y_cl)
-    label2Num = {str(label): idx for idx, label in enumerate(unique_labels)}
-    Num2Label = {idx: str(label) for idx, label in enumerate(unique_labels)}
-
-    # Update Y_cl to use numeric labels
-    Y_cl = np.array([label2Num[str(y)] for y in Y_cl])
-
-    print(f"Updated valid labels: {list(label2Num.keys())}")
-    print(f"Loaded data shape - X: {np.array(X).shape}, Y_cl: {np.array(Y_cl).shape}")
-
     # Analyze class distribution
     class_counts = Counter(Y_cl)
     print("Class distribution:", dict(class_counts))
@@ -108,16 +97,27 @@ def main():
     print(f"Filtered data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
     print("Filtered class distribution:", dict(Counter(Y_cl)))
 
-    # Remap labels to be consecutive integers starting from 0
-    unique_labels = sorted(set(Y_cl))
-    label_map = {label: i for i, label in enumerate(unique_labels)}
-    Y_cl = np.array([label_map[y] for y in Y_cl])
+    # Create label mappings (map SNOMED-CT codes to unique integers)
+    unique_labels = np.unique(Y_cl)
+    label2Num = {label: idx for idx, label in enumerate(unique_labels)}
+    Num2Label = {idx: label for idx, label in enumerate(unique_labels)}
 
-    print("Remapped class distribution:", dict(Counter(Y_cl)))
+    # Debug: Print first 10 label mappings
+    print("\nLabel to Number Mapping (first 10):")
+    for label, num in list(label2Num.items())[:10]:
+        print(f"{label}: {num}")
 
-    # Update num_classes and Num2Label
-    num_classes = len(unique_labels)
-    Num2Label = {i: Num2Label[label] for label, i in label_map.items()}
+    print("\nNumber to Label Mapping (first 10):")
+    for num, label in list(Num2Label.items())[:10]:
+        print(f"{num}: {label}")
+
+    # Update Y_cl to use numeric labels
+    Y_cl = np.array([label2Num[y] for y in Y_cl])
+
+    # Define num_classes
+    num_classes = len(label2Num)
+
+    print(f"\nNumber of Classes: {num_classes}")
 
     # Split the data into train, validation, and test sets (before scaling)
     test_size = 0.2
@@ -150,7 +150,7 @@ def main():
     X_test_scaled = scale_dataset(X_test, scaler)
 
     # Print the final shapes
-    print(f"Train set shape: {X_train_scaled.shape}, {y_train.shape}")
+    print(f"\nTrain set shape: {X_train_scaled.shape}, {y_train.shape}")
     print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
     print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
 
@@ -214,11 +214,11 @@ def main():
         )
     ]
 
-    # Train the model
+    # Train the model using scaled data
     history = model.fit(
         X_train_scaled, y_nn_train, 
         epochs=30, 
-        validation_data=(X_valid, y_nn_valid),
+        validation_data=(X_valid_scaled, y_nn_valid),
         batch_size=256, 
         shuffle=True, 
         callbacks=callbacks, 
@@ -234,7 +234,7 @@ def main():
             y_pred, y_true, f'confusion_matrix_{name.lower()}.png', output_dir, list(Num2Label.values())
         )
 
-    # Evaluate the model on train, validation, and test sets
+    # Evaluate the model on scaled data
     evaluate_model(X_train_scaled, y_train, 'Training')
     evaluate_model(X_valid_scaled, y_valid, 'Validation')
     evaluate_model(X_test_scaled, y_test, 'Test')
