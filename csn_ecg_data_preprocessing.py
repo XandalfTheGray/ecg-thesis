@@ -1,4 +1,5 @@
 # csn_ecg_data_preprocessing.py
+# This script preprocesses the CSN ECG dataset, extracting SNOMED-CT codes and ECG data
 
 import numpy as np
 import os
@@ -8,23 +9,54 @@ import wfdb
 import logging
 import pandas as pd
 
+# Uncomment the following line to enable detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_snomed_ct_mapping(csv_path):
+    """
+    Load SNOMED-CT codes and their corresponding full names from a CSV file.
+    
+    Args:
+    csv_path (str): Path to the CSV file containing SNOMED-CT codes and names.
+    
+    Returns:
+    dict: A dictionary mapping SNOMED-CT codes to their full names.
+    """
     df = pd.read_csv(csv_path)
     mapping = dict(zip(df['Snomed_CT'].astype(str), df['Full Name']))
     logging.info(f"Loaded {len(mapping)} SNOMED-CT codes from CSV")
     return mapping
 
 def extract_snomed_ct_code(header):
+    """
+    Extract the SNOMED-CT code from the header of an ECG record.
+    
+    Args:
+    header (wfdb.io.record.Record): The header of an ECG record.
+    
+    Returns:
+    str: The extracted SNOMED-CT code, or None if not found.
+    """
     for comment in header.comments:
-        if comment.startswith('Dx:'):  # Remove the '#' before 'Dx:'
+        if comment.startswith('Dx:'):
             codes = comment.split(':')[1].strip().split(',')
             return codes[-1].strip()  # Return the last code
     logging.warning(f"No Dx field found in header comments: {header.comments}")
     return None
 
 def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
+    """
+    Load and preprocess ECG data from the CSN dataset.
+    
+    Args:
+    database_path (str): Path to the database containing ECG records.
+    data_entries (list): List of record names to process.
+    snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to full names.
+    max_records (int, optional): Maximum number of records to process.
+    
+    Returns:
+    tuple: Numpy arrays of processed ECG data (X) and corresponding SNOMED-CT codes (Y_cl).
+    """
     X, Y_cl = [], []
     processed_records = 0
     skipped_records = 0
@@ -88,6 +120,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
             logging.error(f"Error processing record {record}: {str(e)}")
             skipped_records += 1
 
+    # Log summary statistics
     logging.info(f"Processed {processed_records} records")
     logging.info(f"Skipped {skipped_records} records")
     logging.info(f"Records with no SNOMED-CT code: {no_code_count}")
@@ -102,6 +135,9 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
     return np.array(X), np.array(Y_cl)
 
 def main():
+    """
+    Main function to demonstrate the usage of the data preprocessing functions.
+    """
     # Set up logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -128,8 +164,6 @@ def main():
     # Print summary
     print(f"Loaded data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
     print(f"Unique SNOMED-CT codes: {np.unique(Y_cl)}")
-
-    # Further processing can be added here
 
 if __name__ == '__main__':
     main()
