@@ -1,4 +1,4 @@
-# data_preprocessing.py
+# mitbih_data_preprocessing.py
 
 import wfdb
 import numpy as np

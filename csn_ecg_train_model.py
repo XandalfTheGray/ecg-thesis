@@ -1,4 +1,4 @@
-# train_model.py
+# csn_ecg_train_model.py
 
 import os
 import numpy as np
@@ -15,12 +15,12 @@ from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet
 from evaluation import print_stats, showConfusionMatrix
 
 # Import data preprocessing functions
-from mitbih_data_preprocessing import processRecord, segmentSignal
+from csn_ecg_data_preprocessing import load_data as load_csn_data, load_snomed_ct_mapping
 
 def main():
     # Setup
     base_output_dir = 'output_plots'
-    dataset_name = 'mitbih'
+    dataset_name = 'csn_ecg'
     model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
 
     # Create a unique directory name with dataset, model, and datetime
@@ -37,26 +37,59 @@ def main():
     }
     
     # Define data entries and labels
-    data_entries = ['100', '101', '103', '105', '106', '107', '108', '109', '111', '112', '113',
-                    '114', '115', '116', '117', '118', '119', '121', '122', '123', '124', '200', '201', '202',
-                    '203', '205', '207', '208', '209', '210', '212', '213', '214', '215', '217', '219', '221',
-                    '222', '223', '228', '230', '231', '232', '233', '234']
-    valid_labels = ['N', 'V', 'A', 'R', 'L', '/']
-    database_path = 'mit-bih-arrhythmia-database/mit-bih-arrhythmia-database-1.0.0/'
+    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
+    wfdb_dir = os.path.join(database_path, 'WFDBRecords')
+    
+    if not os.path.exists(wfdb_dir):
+        print(f"Error: Directory {wfdb_dir} does not exist.")
+        return
 
-    label2Num = {label: idx for idx, label in enumerate(valid_labels)}
-    Num2Label = {idx: label for idx, label in enumerate(valid_labels)}
-    print(f"Processing {len(data_entries)} records for MITBIH dataset")
-    X, Y_cl = [], []
-    for record in data_entries:
-        ecg_reading = processRecord(record, database_path)
-        if ecg_reading is not None:
-            segments, labels, _ = segmentSignal(ecg_reading, valid_labels, label2Num)
-            X.extend(segments)
-            Y_cl.extend(labels)
-        else:
-            print(f"Warning: No data for record {record}")
-    X, Y_cl = np.array(X), np.array(Y_cl)
+    data_entries = []
+
+    # Traverse the WFDBRecords directory to gather all record names
+    for subdir, dirs, files in os.walk(wfdb_dir):
+        for file in files:
+            if file.endswith('.mat'):
+                record_path = os.path.join(subdir, file)
+                record_name = os.path.relpath(record_path, wfdb_dir)
+                record_name = os.path.splitext(record_name)[0]  # Remove the .mat extension
+                data_entries.append(record_name)
+
+    print(f"Total records found for CSN ECG: {len(data_entries)}")
+    
+    if len(data_entries) == 0:
+        print("Error: No records found. Check the database path and file structure.")
+        return
+
+    # Set the maximum number of records to load
+    max_records = 5000
+    print(f"Processing up to {max_records} records for CSN ECG dataset")
+    csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path)
+    X, Y_cl = load_csn_data(wfdb_dir, data_entries, snomed_ct_mapping, max_records=max_records)
+
+    if X.size == 0 or Y_cl.size == 0:
+        print("Error: No data was loaded. Check the data preprocessing step.")
+        return
+
+    print(f"Loaded data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
+    print(f"Unique SNOMED-CT codes: {np.unique(Y_cl)}")
+    print(f"SNOMED-CT code distribution: {dict(Counter(Y_cl))}")
+
+    # Create a mapping for unknown codes
+    unknown_codes = [code for code in np.unique(Y_cl) if code not in snomed_ct_mapping]
+    for code in unknown_codes:
+        snomed_ct_mapping[code] = f"Unknown_{code}"
+
+    # Update label2Num and create Num2Label
+    unique_labels = np.unique(Y_cl)
+    label2Num = {str(label): idx for idx, label in enumerate(unique_labels)}
+    Num2Label = {idx: str(label) for idx, label in enumerate(unique_labels)}
+
+    # Update Y_cl to use the new label indices
+    Y_cl = np.array([label2Num[str(y)] for y in Y_cl])
+
+    print(f"Updated valid labels: {list(label2Num.keys())}")
     
     print(f"Loaded data shape - X: {np.array(X).shape}, Y_cl: {np.array(Y_cl).shape}")
 
@@ -90,7 +123,7 @@ def main():
     num_samples, num_timesteps, num_channels = X.shape
 
     # Scale Data per Channel
-    X_reshaped = X.reshape(-1, num_channels)  # Shape: (samples * timesteps, channels)
+    X_reshaped = X.reshape(-1, num_channels)
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_reshaped)
     X_scaled = X_scaled.reshape(num_samples, num_timesteps, num_channels)

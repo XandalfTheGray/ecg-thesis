@@ -4,75 +4,132 @@ import numpy as np
 import os
 import random
 from scipy.io import loadmat
+import wfdb
+import logging
+import pandas as pd
 
-def load_data(database_path, data_entries, valid_labels, label2Num, max_records=None):
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def load_snomed_ct_mapping(csv_path):
+    df = pd.read_csv(csv_path)
+    mapping = dict(zip(df['Snomed_CT'].astype(str), df['Full Name']))
+    logging.info(f"Loaded {len(mapping)} SNOMED-CT codes from CSV")
+    return mapping
+
+def extract_snomed_ct_code(header):
+    for comment in header.comments:
+        if comment.startswith('Dx:'):  # Remove the '#' before 'Dx:'
+            codes = comment.split(':')[1].strip().split(',')
+            return codes[-1].strip()  # Return the last code
+    logging.warning(f"No Dx field found in header comments: {header.comments}")
+    return None
+
+def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
     X, Y_cl = [], []
     processed_records = 0
-    
-    print(f"Starting to process CSN ECG data. Max records: {max_records}")
-    print(f"Database path: {database_path}")
-    print(f"Number of data entries: {len(data_entries)}")
-    print(f"Valid labels: {valid_labels}")
-    
-    # Optionally limit the number of records
+    skipped_records = 0
+    diagnosis_counts = {}
+    no_code_count = 0
+    missing_code_count = 0
+    missing_codes = set()
+
+    logging.info(f"Starting to process data. Max records: {max_records}")
+    logging.info(f"Number of data entries: {len(data_entries)}")
+
     if max_records is not None:
         data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
-    
+
     for record in data_entries:
-        print(f"\nProcessing record: {record}")
         mat_file = os.path.join(database_path, record + '.mat')
-        print(f"Full mat file path: {mat_file}")
-        
-        if not os.path.exists(mat_file):
-            print(f"Error: Mat file not found for record {record}")
+        hea_file = os.path.join(database_path, record + '.hea')
+
+        if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+            logging.warning(f"Files not found for record {record}")
+            skipped_records += 1
             continue
-        
+
         try:
-            # Load the mat file
+            # Load ECG data from .mat file
             mat_data = loadmat(mat_file)
-            
-            # Print the keys in the mat file
-            print(f"Keys in the mat file: {mat_data.keys()}")
-            
-            # Assuming the ECG data is stored directly in the mat file
-            # You might need to adjust this based on the actual structure
-            if 'val' in mat_data:
-                ecg_signal = mat_data['val']
-                print(f"Successfully read signal. Shape: {ecg_signal.shape}")
-            else:
-                print("Error: 'val' key not found in the mat file")
+            if 'val' not in mat_data:
+                logging.warning(f"'val' key not found in mat file for record {record}")
+                skipped_records += 1
                 continue
-            
-            # Check if 'rhythm' exists in the mat file
-            if 'rhythm' in mat_data:
-                rhythm_annotations = mat_data['rhythm']
-                print(f"Rhythm annotations: {rhythm_annotations}")
+            ecg_data = mat_data['val']
+
+            # Read header file to get the SNOMED-CT code
+            record_header = wfdb.rdheader(os.path.join(database_path, record))
+            snomed_ct_code = extract_snomed_ct_code(record_header)
+
+            if snomed_ct_code is None:
+                no_code_count += 1
+                logging.warning(f"No SNOMED-CT code found for record {record}")
+                continue
+
+            if snomed_ct_code not in snomed_ct_mapping:
+                missing_code_count += 1
+                missing_codes.add(snomed_ct_code)
+                diagnosis = f"Unknown_{snomed_ct_code}"
             else:
-                print("Warning: 'rhythm' key not found in the mat file")
-                rhythm_annotations = ['Unknown']  # Default label if not found
-            
-            # Process the rhythm annotations
-            valid_beats = 0
-            for label in rhythm_annotations:
-                if label in valid_labels:
-                    X.append(ecg_signal)
-                    Y_cl.append(label2Num[label])
-                    valid_beats += 1
-            
+                diagnosis = snomed_ct_mapping[snomed_ct_code]
+
+            diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
+
+            # Process ECG data
+            X.append(ecg_data.T)  # Transpose to have shape (time_steps, leads)
+            Y_cl.append(snomed_ct_code)
+
             processed_records += 1
-            print(f"Processed record {record}. Valid beats extracted: {valid_beats}")
-            print(f"Current X length: {len(X)}, Y_cl length: {len(Y_cl)}")
-        
+
+            if processed_records % 100 == 0:
+                logging.info(f"Processed {processed_records} records")
+
         except Exception as e:
-            print(f"Error processing record {record}: {str(e)}")
-            print(f"Error type: {type(e).__name__}")
-            continue  # Skip problematic records
-    
-    print(f"\nProcessed {processed_records} records")
-    print(f"Final X length: {len(X)}, Y_cl length: {len(Y_cl)}")
-    
-    if len(X) > 0:
-        print(f"Shape of first item in X: {X[0].shape}")
-        print(f"Unique labels in Y_cl: {set(Y_cl)}")
-    
+            logging.error(f"Error processing record {record}: {str(e)}")
+            skipped_records += 1
+
+    logging.info(f"Processed {processed_records} records")
+    logging.info(f"Skipped {skipped_records} records")
+    logging.info(f"Records with no SNOMED-CT code: {no_code_count}")
+    logging.info(f"Records with missing SNOMED-CT code in mapping: {missing_code_count}")
+    logging.info(f"Missing SNOMED-CT codes: {missing_codes}")
+    logging.info(f"Diagnosis counts: {diagnosis_counts}")
+
+    if len(X) == 0:
+        logging.error("No data was processed successfully")
+        return np.array([]), np.array([])
+
     return np.array(X), np.array(Y_cl)
+
+def main():
+    # Set up logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # Paths
+    database_path = 'path/to/WFDBRecords'
+    csv_path = 'path/to/ConditionNames_SNOMED-CT.csv'
+
+    # Load SNOMED-CT mapping
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path)
+
+    # Get all record names
+    data_entries = []
+    for subdir, dirs, files in os.walk(database_path):
+        for file in files:
+            if file.endswith('.mat'):
+                record_path = os.path.join(subdir, file)
+                record_name = os.path.relpath(record_path, database_path)
+                record_name = os.path.splitext(record_name)[0]
+                data_entries.append(record_name)
+
+    # Load data
+    X, Y_cl = load_data(database_path, data_entries, snomed_ct_mapping, max_records=5000)
+
+    # Print summary
+    print(f"Loaded data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
+    print(f"Unique SNOMED-CT codes: {np.unique(Y_cl)}")
+
+    # Further processing can be added here
+
+if __name__ == '__main__':
+    main()
