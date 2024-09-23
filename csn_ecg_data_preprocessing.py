@@ -98,22 +98,7 @@ def plot_ecg_signal(ecg_signal, record_name, plot_dir):
     plt.savefig(os.path.join(plot_dir, f'{simplified_name}.png'))
     plt.close()
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots=5, plot_dir='output_plots/test_ecg_plots/'):
-    """
-    Load and preprocess ECG data from the CSN dataset.
-    
-    Args:
-    database_path (str): Path to the database containing ECG records.
-    data_entries (list): List of record names to process.
-    snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to full names.
-    max_records (int, optional): Maximum number of records to process.
-    desired_length (int): The fixed number of time steps for ECG data.
-    num_plots (int): Number of ECG signals to plot.
-    plot_dir (str): Directory where ECG plots will be saved.
-    
-    Returns:
-    tuple: Numpy array of processed ECG data (X) and list of corresponding SNOMED-CT codes (Y_cl).
-    """
+def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots=5, plot_dir='output_plots/test_ecg_plots/', batch_size=1000):
     X, Y_cl = [], []
     processed_records = 0
     skipped_records = 0
@@ -122,7 +107,6 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     missing_code_count = 0
     missing_codes = set()
     
-    # Create plot directory if it doesn't exist
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
     
@@ -130,75 +114,76 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     logging.info(f"Number of data entries: {len(data_entries)}")
     
     if max_records is not None:
-        random.seed(42)  # For reproducibility
+        random.seed(42)
         data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
     
-    for record in data_entries:
-        mat_file = os.path.join(database_path, record + '.mat')
-        hea_file = os.path.join(database_path, record + '.hea')
-    
-        if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-            logging.warning(f"Files not found for record {record}")
-            skipped_records += 1
-            continue
-    
-        try:
-            # Load ECG data from .mat file
-            mat_data = loadmat(mat_file)
-            if 'val' not in mat_data:
-                logging.warning(f"'val' key not found in mat file for record {record}")
+    for i in range(0, len(data_entries), batch_size):
+        batch = data_entries[i:i+batch_size]
+        for record in batch:
+            mat_file = os.path.join(database_path, record + '.mat')
+            hea_file = os.path.join(database_path, record + '.hea')
+        
+            if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+                logging.warning(f"Files not found for record {record}")
                 skipped_records += 1
                 continue
-            ecg_data = mat_data['val']
-    
-            # Verify ECG data dimensions
-            if ecg_data.ndim != 2:
-                logging.warning(f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}")
+        
+            try:
+                mat_data = loadmat(mat_file)
+                if 'val' not in mat_data:
+                    logging.warning(f"'val' key not found in mat file for record {record}")
+                    skipped_records += 1
+                    continue
+                ecg_data = mat_data['val']
+        
+                if ecg_data.ndim != 2:
+                    logging.warning(f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}")
+                    skipped_records += 1
+                    continue
+        
+                record_header = wfdb.rdheader(os.path.join(database_path, record))
+                snomed_ct_codes = extract_snomed_ct_codes(record_header)
+        
+                if not snomed_ct_codes:
+                    no_code_count += 1
+                    logging.warning(f"No SNOMED-CT codes found for record {record}")
+                    continue
+        
+                valid_codes = []
+                for code in snomed_ct_codes:
+                    if code in snomed_ct_mapping:
+                        valid_codes.append(code)
+                        diagnosis = snomed_ct_mapping[code]
+                        diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
+                    else:
+                        valid_codes.append('Unknown')
+                        diagnosis_counts['Unknown'] = diagnosis_counts.get('Unknown', 0) + 1
+                        missing_code_count += 1
+                        missing_codes.add(code)
+        
+                ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
+                X.append(ecg_padded)
+                Y_cl.append(valid_codes)
+        
+                if processed_records < num_plots:
+                    plot_ecg_signal(ecg_padded, record, plot_dir)
+                    logging.info(f"Plotted ECG signal for record {record}")
+        
+                processed_records += 1
+        
+                if processed_records % 100 == 0:
+                    logging.info(f"Processed {processed_records} records")
+        
+                if max_records and processed_records >= max_records:
+                    break
+        
+            except Exception as e:
+                logging.error(f"Error processing record {record}: {str(e)}")
                 skipped_records += 1
-                continue
+        
+        if max_records and processed_records >= max_records:
+            break
     
-            # Read header file to get the SNOMED-CT codes
-            record_header = wfdb.rdheader(os.path.join(database_path, record))
-            snomed_ct_codes = extract_snomed_ct_codes(record_header)
-    
-            if not snomed_ct_codes:
-                no_code_count += 1
-                logging.warning(f"No SNOMED-CT codes found for record {record}")
-                continue
-    
-            # Map codes to their full names, handle unknown codes
-            valid_codes = []
-            for code in snomed_ct_codes:
-                if code in snomed_ct_mapping:
-                    valid_codes.append(code)
-                    diagnosis = snomed_ct_mapping[code]
-                    diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
-                else:
-                    valid_codes.append('Unknown')
-                    diagnosis_counts['Unknown'] = diagnosis_counts.get('Unknown', 0) + 1
-                    missing_code_count += 1
-                    missing_codes.add(code)
-    
-            # Process ECG data with padding
-            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)  # Shape: (desired_length, leads)
-            X.append(ecg_padded)  # Shape: (desired_length, leads)
-            Y_cl.append(valid_codes)
-    
-            # Plot ECG signal if under the plot limit
-            if processed_records < num_plots:
-                plot_ecg_signal(ecg_padded, record, plot_dir)
-                logging.info(f"Plotted ECG signal for record {record}")
-    
-            processed_records += 1
-    
-            if processed_records % 100 == 0:
-                logging.info(f"Processed {processed_records} records")
-    
-        except Exception as e:
-            logging.error(f"Error processing record {record}: {str(e)}")
-            skipped_records += 1
-    
-    # Log summary statistics
     logging.info(f"Processed {processed_records} records")
     logging.info(f"Skipped {skipped_records} records")
     logging.info(f"Records with no SNOMED-CT codes: {no_code_count}")

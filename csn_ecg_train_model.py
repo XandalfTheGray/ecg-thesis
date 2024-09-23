@@ -63,7 +63,7 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 5000
+    max_records = 10000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
     csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
 
@@ -88,51 +88,87 @@ def main():
     unique_codes = set(code for sublist in Y_cl for code in sublist)
     print(f"Unique SNOMED-CT codes: {unique_codes}")
 
-    # Analyze class distribution
-    # Flatten Y_cl for counting
-    flat_Y = [code for sublist in Y_cl for code in sublist]
-    class_counts = Counter(flat_Y)
-    print("Class distribution:", dict(class_counts))
+    # Analyze initial class distribution
+    initial_class_counts = Counter([item for sublist in Y_cl for item in sublist])
+    print("Initial class distribution:", dict(initial_class_counts))
 
-    # Filter out classes with less than 10 samples
-    min_samples_per_class = 10
-    valid_classes = {cls for cls, count in class_counts.items() if count >= min_samples_per_class}
-
-    # Include 'Unknown' only if it has sufficient samples
-    if 'Unknown' in class_counts and class_counts['Unknown'] < min_samples_per_class:
-        valid_classes.discard('Unknown')
+    # Remove classes that occur less than 10 times (more aggressive filtering)
+    min_class_count = 10
+    valid_classes = {cls for cls, count in initial_class_counts.items() if count >= min_class_count}
+    
+    # Filter Y_cl to only include valid classes
+    Y_cl_filtered = [[cls for cls in sample if cls in valid_classes] for sample in Y_cl]
+    
+    # Remove samples that don't have any valid classes left
+    valid_indices = [i for i, sample in enumerate(Y_cl_filtered) if sample]
+    X = X[valid_indices]
+    Y_cl_filtered = [Y_cl_filtered[i] for i in valid_indices]
 
     # Binarize the labels for multi-label classification
     mlb = MultiLabelBinarizer(classes=sorted(valid_classes))
-    Y_binarized = mlb.fit_transform(Y_cl)
+    Y_binarized = mlb.fit_transform(Y_cl_filtered)
 
-    # Update snomed_ct_mapping to include only valid classes
+    # Update label mappings
     label_names = mlb.classes_
     Num2Label = {idx: label for idx, label in enumerate(label_names)}
     label2Num = {label: idx for idx, label in enumerate(label_names)}
     num_classes = len(label_names)
 
-    print("\nLabel to Number Mapping (first 10):")
-    for label, num in list(label2Num.items())[:10]:
+    print("\nUpdated Label to Number Mapping:")
+    for label, num in label2Num.items():
         print(f"{label}: {num}")
 
-    print("\nNumber to Label Mapping (first 10):")
-    for num, label in list(Num2Label.items())[:10]:
-        print(f"{num}: {label}")
+    print(f"\nNumber of Classes after preprocessing: {num_classes}")
 
-    print(f"\nNumber of Classes: {num_classes}")
+    # Print updated class distribution
+    updated_class_counts = Counter([item for sublist in Y_cl_filtered for item in sublist])
+    print("Updated class distribution:", dict(updated_class_counts))
+
+    # Print shape of X and Y_binarized
+    print(f"Shape of X: {X.shape}")
+    print(f"Shape of Y_binarized: {Y_binarized.shape}")
+
+    # Check if we have at least two samples for each class
+    samples_per_class = Y_binarized.sum(axis=0)
+    min_samples_per_class = samples_per_class.min()
+    print(f"Samples per class: {samples_per_class}")
+    print(f"Minimum samples for any class: {min_samples_per_class}")
+
+    if min_samples_per_class < 2:
+        print("Error: There are still classes with less than 2 samples.")
+        return
+
+    # Check for samples with no positive labels
+    samples_with_no_labels = (Y_binarized.sum(axis=1) == 0).sum()
+    if samples_with_no_labels > 0:
+        print(f"Warning: {samples_with_no_labels} samples have no positive labels.")
+        # Remove these samples
+        valid_samples = Y_binarized.sum(axis=1) > 0
+        X = X[valid_samples]
+        Y_binarized = Y_binarized[valid_samples]
+        print(f"Shape after removing samples with no labels - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
 
     # Split the data into train, validation, and test sets (before scaling)
     test_size = 0.2
     val_size = 0.25  # 25% of the remaining 80% = 20% of total
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, Y_binarized, test_size=test_size, random_state=42, stratify=Y_binarized
-    )
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, Y_binarized, test_size=test_size, random_state=42, stratify=Y_binarized
+        )
 
-    X_train, X_valid, y_train, y_valid = train_test_split(
-        X_train, y_train, test_size=val_size, random_state=42, stratify=y_train
-    )
+        X_train, X_valid, y_train, y_valid = train_test_split(
+            X_train, y_train, test_size=val_size, random_state=42, stratify=y_train
+        )
+    except ValueError as e:
+        print(f"Error during train_test_split: {str(e)}")
+        print("Attempting split without stratification...")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, Y_binarized, test_size=test_size, random_state=42
+        )
+        X_train, X_valid, y_train, y_valid = train_test_split(
+            X_train, y_train, test_size=val_size, random_state=42
+        )
 
     # Reshape and Scale data
     def scale_dataset(X, scaler):
