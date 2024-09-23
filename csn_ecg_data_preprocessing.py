@@ -1,4 +1,4 @@
-# File: csn_ecg_data_preprocessing.py
+# csn_ecg_data_preprocessing.py
 # This script preprocesses the CSN ECG dataset, extracting SNOMED-CT codes and ECG data
 
 import numpy as np
@@ -52,7 +52,26 @@ def extract_snomed_ct_codes(header):
         logging.warning(f"No Dx field found in header comments: {header.comments}")
     return codes
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
+def pad_ecg_data(ecg_data, desired_length):
+    """
+    Pad or truncate ECG data to a fixed number of time steps.
+    
+    Args:
+    ecg_data (np.ndarray): ECG data array with shape (time_steps, leads).
+    desired_length (int): The desired number of time steps.
+    
+    Returns:
+    np.ndarray: ECG data array with shape (desired_length, leads).
+    """
+    current_length = ecg_data.shape[0]
+    if current_length < desired_length:
+        padding = np.zeros((desired_length - current_length, ecg_data.shape[1]))
+        ecg_padded = np.vstack((ecg_data, padding))
+    else:
+        ecg_padded = ecg_data[:desired_length, :]
+    return ecg_padded
+
+def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000):
     """
     Load and preprocess ECG data from the CSN dataset.
     
@@ -61,9 +80,10 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
     data_entries (list): List of record names to process.
     snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to full names.
     max_records (int, optional): Maximum number of records to process.
+    desired_length (int): The fixed number of time steps for ECG data.
     
     Returns:
-    tuple: Numpy arrays of processed ECG data (X) and corresponding SNOMED-CT codes (Y_cl).
+    tuple: Numpy array of processed ECG data (X) and list of corresponding SNOMED-CT codes (Y_cl).
     """
     X, Y_cl = [], []
     processed_records = 0
@@ -122,9 +142,13 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
                     diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
                 else:
                     valid_codes.append('Unknown')
+                    diagnosis_counts['Unknown'] = diagnosis_counts.get('Unknown', 0) + 1
+                    missing_code_count += 1
+                    missing_codes.add(code)
 
-            # Process ECG data
-            X.append(ecg_data.T)  # Transpose to have shape (time_steps, leads)
+            # Process ECG data with padding
+            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)  # Shape: (desired_length, leads)
+            X.append(ecg_padded)  # Shape: (desired_length, leads)
             Y_cl.append(valid_codes)
 
             processed_records += 1
@@ -146,6 +170,6 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None):
 
     if len(X) == 0:
         logging.error("No data was processed successfully")
-        return np.array([]), np.array([])
+        return np.array([]), []
 
-    return np.array(X), np.array(Y_cl)
+    return np.array(X), Y_cl

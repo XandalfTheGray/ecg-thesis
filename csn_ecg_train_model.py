@@ -38,7 +38,8 @@ def main():
     }
     
     # Set up paths for the CSN ECG dataset
-    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
+    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+                                 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
     wfdb_dir = os.path.join(database_path, 'WFDBRecords')
     
     if not os.path.exists(wfdb_dir):
@@ -76,18 +77,16 @@ def main():
     ]
 
     snomed_ct_mapping = load_snomed_ct_mapping(csv_path, selected_conditions)
-    X, Y_cl = load_csn_data(wfdb_dir, data_entries, snomed_ct_mapping, max_records=max_records)
+    X, Y_cl = load_csn_data(wfdb_dir, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=5000)
 
-    if X.size == 0 or Y_cl.size == 0:
+    if X.size == 0 or len(Y_cl) == 0:
         print("Error: No data was loaded. Check the data preprocessing step.")
         return
 
     # Print data summary
-    print(f"Loaded data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
-    print(f"Unique SNOMED-CT codes: {np.unique(Y_cl)}")
-    print(f"SNOMED-CT code distribution: {dict(Counter([code for sublist in Y_cl for code in sublist]))}")
-
-    # Handle unknown SNOMED-CT codes are already mapped to 'Unknown' during preprocessing
+    print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
+    unique_codes = set(code for sublist in Y_cl for code in sublist)
+    print(f"Unique SNOMED-CT codes: {unique_codes}")
 
     # Analyze class distribution
     # Flatten Y_cl for counting
@@ -162,10 +161,14 @@ def main():
     # For multi-label, compute class weights individually
     class_weights = {}
     for i, class_label in enumerate(label_names):
-        weights = class_weight.compute_class_weight(
-            'balanced', classes=[0,1], y=y_train[:, i]
-        )
-        class_weights[i] = weights[1]  # Weight for class 1
+        # Compute class weight based on the frequency of each class
+        class_count = y_train[:, i].sum()
+        if class_count == 0:
+            class_weights[i] = 1.0
+        else:
+            class_weights[i] = (len(y_train) / (num_classes * class_count))
+    # Alternatively, use sklearn's compute_class_weight for each class
+    # This implementation is a simplified approach
 
     # Build the neural network model
     if model_type == 'cnn':
