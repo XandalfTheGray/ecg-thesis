@@ -22,26 +22,22 @@ def main():
     # Setup parameters
     base_output_dir = 'output_plots'
     dataset_name = 'csn_ecg'
-    model_type = 'resnet18'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50'
+    model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50'
 
     # Create a unique output directory
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{current_time}")
     os.makedirs(output_dir, exist_ok=True)
     
-    # Define model parameters for ResNet18
+    # Define model parameters for CNN
     model_params = {
         'l2_reg': 0.001,  # L2 regularization factor
-        'dropout_rate': 0.3,  # Dropout rate
-        'initial_filters': 64,  # Number of filters in the first convolutional layer
-        'filter_multiplier': 2,  # Factor by which the number of filters increases in each block
-        'num_blocks': [2, 2, 2, 2],  # Number of residual blocks in each stage
-        'use_batch_norm': True,  # Whether to use batch normalization
-        'pool_size': 2,  # Pooling size for max pooling layers
-        'dense_units': 256,  # Number of units in the dense layer before the output
+        'filters': [32, 64, 128],  # Number of filters for each convolutional layer
+        'kernel_sizes': [5, 5, 5],  # Kernel sizes for each convolutional layer
+        'dropout_rates': [0.3, 0.3, 0.3, 0.3],  # Dropout rates for each layer
         'learning_rate': 1e-3,  # Initial learning rate
     }
-    
+
     # Set up paths for the CSN ECG dataset
     database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                  'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
@@ -72,16 +68,15 @@ def main():
     print(f"Processing up to {max_records} records for CSN ECG dataset")
     csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
 
-    # Specify the conditions you want to classify
-    selected_conditions = [
-        'Sinus Rhythm',
-        'Atrial Fibrillation',
-        'Atrial Flutter',
-        'Sinus Bradycardia',
-        'Sinus Tachycardia'
-    ]
+    # Define the class mapping
+    class_mapping = {
+        'AFIB': ['Atrial fibrillation', 'Atrial flutter'],
+        'GSVT': ['Supraventricular tachycardia', 'Atrial tachycardia', 'Sinus node dysfunction', 'Sinus tachycardia', 'Atrioventricular nodal reentry tachycardia', 'Atrioventricular reentrant tachycardia'],
+        'SB': ['Sinus bradycardia'],
+        'SR': ['Sinus rhythm', 'Sinus irregularity']
+    }
 
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, selected_conditions)
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping)
     X, Y_cl = load_csn_data(wfdb_dir, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=5000)
 
     if X.size == 0 or len(Y_cl) == 0:
@@ -90,28 +85,16 @@ def main():
 
     # Print data summary
     print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
-    unique_codes = set(code for sublist in Y_cl for code in sublist)
-    print(f"Unique SNOMED-CT codes: {unique_codes}")
+    unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
+    print(f"Unique classes: {unique_classes}")
 
     # Analyze initial class distribution
     initial_class_counts = Counter([item for sublist in Y_cl for item in sublist])
     print("Initial class distribution:", dict(initial_class_counts))
 
-    # Remove classes that occur less than 10 times (more aggressive filtering)
-    min_class_count = 10
-    valid_classes = {cls for cls, count in initial_class_counts.items() if count >= min_class_count}
-    
-    # Filter Y_cl to only include valid classes
-    Y_cl_filtered = [[cls for cls in sample if cls in valid_classes] for sample in Y_cl]
-    
-    # Remove samples that don't have any valid classes left
-    valid_indices = [i for i, sample in enumerate(Y_cl_filtered) if sample]
-    X = X[valid_indices]
-    Y_cl_filtered = [Y_cl_filtered[i] for i in valid_indices]
-
     # Binarize the labels for multi-label classification
-    mlb = MultiLabelBinarizer(classes=sorted(valid_classes))
-    Y_binarized = mlb.fit_transform(Y_cl_filtered)
+    mlb = MultiLabelBinarizer(classes=sorted(unique_classes))
+    Y_binarized = mlb.fit_transform(Y_cl)
 
     # Update label mappings
     label_names = mlb.classes_
@@ -119,14 +102,14 @@ def main():
     label2Num = {label: idx for idx, label in enumerate(label_names)}
     num_classes = len(label_names)
 
-    print("\nUpdated Label to Number Mapping:")
+    print("\nLabel to Number Mapping:")
     for label, num in label2Num.items():
         print(f"{label}: {num}")
 
-    print(f"\nNumber of Classes after preprocessing: {num_classes}")
+    print(f"\nNumber of Classes: {num_classes}")
 
     # Print updated class distribution
-    updated_class_counts = Counter([item for sublist in Y_cl_filtered for item in sublist])
+    updated_class_counts = Counter([item for sublist in Y_cl for item in sublist])
     print("Updated class distribution:", dict(updated_class_counts))
 
     # Print shape of X and Y_binarized
@@ -224,21 +207,21 @@ def main():
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
             activation='sigmoid',  # For multi-label
-            l2_reg=model_params['l2_reg']
+            **model_params
         )
     elif model_type == 'resnet34':
         model = build_resnet34_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
             activation='sigmoid',  # For multi-label
-            l2_reg=model_params['l2_reg']
+            **model_params
         )
     elif model_type == 'resnet50':
         model = build_resnet50_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
             activation='sigmoid',  # For multi-label
-            l2_reg=model_params['l2_reg']
+            **model_params
         )
     else:
         raise ValueError("Invalid model type.")

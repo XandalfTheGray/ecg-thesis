@@ -3,10 +3,14 @@ from keras import layers, models
 from keras.regularizers import l2
 from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization
 
-def build_cnn(input_shape, num_classes, filters, kernel_sizes, dropout_rates, l2_reg=0.001, activation='softmax'):
+def build_cnn(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
     Builds a Convolutional Neural Network (CNN) with two Conv1D layers per block and MaxPooling.
     """
+    filters = kwargs.get('filters', [32, 64, 128])
+    kernel_sizes = kwargs.get('kernel_sizes', [5, 5, 5])
+    dropout_rates = kwargs.get('dropout_rates', [0.3, 0.3, 0.3, 0.3])
+
     inputs = Input(shape=input_shape)
     x = inputs
     for i in range(len(filters)):
@@ -112,7 +116,7 @@ def bottleneck_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
     x = layers.Activation('relu')(x)
     return x
 
-def build_resnet18_1d(input_shape, num_classes, l2_reg=0.001, activation='softmax'):
+def build_resnet18_1d(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
     Builds ResNet18 architecture for 1D data.
 
@@ -121,6 +125,7 @@ def build_resnet18_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     - num_classes (int): Number of output classes.
     - l2_reg (float): L2 regularization factor.
     - activation (str): Activation function for the output layer ('softmax' or 'sigmoid').
+    - **kwargs: Additional keyword arguments (ignored for ResNet18).
 
     Returns:
     - model (keras.Model): Compiled ResNet18 model.
@@ -152,7 +157,7 @@ def build_resnet18_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     model = models.Model(inputs, outputs)
     return model
 
-def build_resnet34_1d(input_shape, num_classes, l2_reg=0.001, activation='softmax'):
+def build_resnet34_1d(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
     Builds ResNet34 architecture for 1D data.
 
@@ -161,6 +166,7 @@ def build_resnet34_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     - num_classes (int): Number of output classes.
     - l2_reg (float): L2 regularization factor.
     - activation (str): Activation function for the output layer ('softmax' or 'sigmoid').
+    - **kwargs: Additional keyword arguments (ignored for ResNet34).
 
     Returns:
     - model (keras.Model): Compiled ResNet34 model.
@@ -192,7 +198,7 @@ def build_resnet34_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     model = models.Model(inputs, outputs)
     return model
 
-def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001, activation='softmax'):
+def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
     Builds ResNet50 architecture for 1D data.
 
@@ -201,6 +207,7 @@ def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     - num_classes (int): Number of output classes.
     - l2_reg (float): L2 regularization factor.
     - activation (str): Activation function for the output layer ('softmax' or 'sigmoid').
+    - **kwargs: Additional keyword arguments (ignored for ResNet50).
 
     Returns:
     - model (keras.Model): Compiled ResNet50 model.

@@ -13,23 +13,32 @@ import matplotlib.pyplot as plt  # Import matplotlib for plotting
 # Uncomment the following line to enable detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_snomed_ct_mapping(csv_path, selected_conditions=None):
+def load_snomed_ct_mapping(csv_path, class_mapping):
     """
-    Load SNOMED-CT codes and their corresponding full names from a CSV file.
+    Load SNOMED-CT codes and their corresponding class names from a CSV file.
     
     Args:
     csv_path (str): Path to the CSV file containing SNOMED-CT codes and names.
-    selected_conditions (list): List of condition names to include. If None, include all.
+    class_mapping (dict): Dictionary mapping class names to lists of condition names.
     
     Returns:
-    dict: A dictionary mapping SNOMED-CT codes to their full names.
+    dict: A dictionary mapping SNOMED-CT codes to their corresponding class names.
     """
     df = pd.read_csv(csv_path)
     
-    if selected_conditions:
-        df = df[df['Full Name'].isin(selected_conditions)]
+    # Create a reverse mapping from condition names to class names
+    condition_to_class = {}
+    for class_name, conditions in class_mapping.items():
+        for condition in conditions:
+            condition_to_class[condition.lower()] = class_name
     
-    mapping = dict(zip(df['Snomed_CT'].astype(str), df['Full Name']))
+    mapping = {}
+    for _, row in df.iterrows():
+        snomed_ct_code = str(row['Snomed_CT'])
+        condition_name = row['Full Name'].lower()
+        if condition_name in condition_to_class:
+            mapping[snomed_ct_code] = condition_to_class[condition_name]
+    
     logging.info(f"Loaded {len(mapping)} SNOMED-CT codes from CSV")
     return mapping
 
@@ -104,8 +113,6 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     skipped_records = 0
     diagnosis_counts = {}
     no_code_count = 0
-    missing_code_count = 0
-    missing_codes = set()
     
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
@@ -152,14 +159,17 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                 valid_codes = []
                 for code in snomed_ct_codes:
                     if code in snomed_ct_mapping:
-                        valid_codes.append(code)
-                        diagnosis = snomed_ct_mapping[code]
-                        diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
+                        class_name = snomed_ct_mapping[code]
+                        valid_codes.append(class_name)
+                        diagnosis_counts[class_name] = diagnosis_counts.get(class_name, 0) + 1
                     else:
-                        valid_codes.append('Unknown')
-                        diagnosis_counts['Unknown'] = diagnosis_counts.get('Unknown', 0) + 1
-                        missing_code_count += 1
-                        missing_codes.add(code)
+                        valid_codes.append('Other')
+                        diagnosis_counts['Other'] = diagnosis_counts.get('Other', 0) + 1
+                
+                # Remove duplicates and 'Other' if there are other valid codes
+                valid_codes = list(set(valid_codes))
+                if len(valid_codes) > 1 and 'Other' in valid_codes:
+                    valid_codes.remove('Other')
         
                 ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
                 X.append(ecg_padded)
@@ -187,8 +197,6 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     logging.info(f"Processed {processed_records} records")
     logging.info(f"Skipped {skipped_records} records")
     logging.info(f"Records with no SNOMED-CT codes: {no_code_count}")
-    logging.info(f"Records with missing SNOMED-CT codes in mapping: {missing_code_count}")
-    logging.info(f"Missing SNOMED-CT codes: {missing_codes}")
     logging.info(f"Diagnosis counts: {diagnosis_counts}")
     
     if len(X) == 0:
@@ -212,17 +220,16 @@ def main():
                             'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                             'ConditionNames_SNOMED-CT.csv')
 
-    # Specify the conditions you want to classify
-    selected_conditions = [
-        'Sinus Rhythm',
-        'Atrial Fibrillation',
-        'Atrial Flutter',
-        'Sinus Bradycardia',
-        'Sinus Tachycardia'
-    ]
+    # Define the class mapping
+    class_mapping = {
+        'AFIB': ['Atrial fibrillation', 'Atrial flutter'],
+        'GSVT': ['Supraventricular tachycardia', 'Atrial tachycardia', 'Sinus node dysfunction', 'Sinus tachycardia', 'Atrioventricular nodal reentry tachycardia', 'Atrioventricular reentrant tachycardia'],
+        'SB': ['Sinus bradycardia'],
+        'SR': ['Sinus rhythm', 'Sinus irregularity']
+    }
 
-    # Load SNOMED-CT mapping with selected conditions
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, selected_conditions)
+    # Load SNOMED-CT mapping with class mapping
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping)
 
     # Get all record names
     data_entries = []
