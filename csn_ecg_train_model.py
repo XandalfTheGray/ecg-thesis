@@ -10,6 +10,8 @@ from sklearn.utils import class_weight
 from tensorflow import keras
 from datetime import datetime
 from collections import Counter
+from sklearn.metrics import multilabel_confusion_matrix, classification_report
+import seaborn as sns
 
 # Import models and evaluation functions
 from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
@@ -64,7 +66,7 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 10000
+    max_records = 400
     print(f"Processing up to {max_records} records for CSN ECG dataset")
     csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
 
@@ -257,33 +259,54 @@ def main():
         callbacks=callbacks, 
         class_weight=class_weights
     )
-
+    
     # Define evaluation function
-    def evaluate_model(dataset, y_true, name):
+    def evaluate_model(dataset, y_true, name, output_dir, label_names):
         y_pred_prob = model.predict(dataset)
         y_pred = (y_pred_prob >= 0.5).astype(int)
+        
         print(f"\n{name} Performance")
-        print_stats(y_pred, y_true)
-        showConfusionMatrix(
-            y_pred, y_true, f'confusion_matrix_{name.lower()}.png', output_dir, list(Num2Label.values())
-        )
+        print(classification_report(y_true, y_pred, target_names=label_names))
+        
+        # Compute confusion matrix for each class
+        conf_matrices = multilabel_confusion_matrix(y_true, y_pred)
+        
+        # Plot confusion matrix for each class
+        for i, conf_matrix in enumerate(conf_matrices):
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues')
+            plt.title(f'Confusion Matrix for {label_names[i]} - {name} Set')
+            plt.ylabel('True label')
+            plt.xlabel('Predicted label')
+            plt.savefig(os.path.join(output_dir, f'confusion_matrix_{name.lower()}_{label_names[i]}.png'))
+            plt.close()
 
     # Evaluate the model on scaled data
-    evaluate_model(X_train_scaled, y_train, 'Training')
-    evaluate_model(X_valid_scaled, y_valid, 'Validation')
-    evaluate_model(X_test_scaled, y_test, 'Test')
+    evaluate_model(X_train_scaled, y_train, 'Training', output_dir, label_names)
+    evaluate_model(X_valid_scaled, y_valid, 'Validation', output_dir, label_names)
+    evaluate_model(X_test_scaled, y_test, 'Test', output_dir, label_names)
 
     # Plot training history
-    for metric in ['loss', 'accuracy']:
-        plt.figure()
-        plt.plot(history.history[metric], label=f'Train {metric.capitalize()}')
-        plt.plot(history.history[f'val_{metric}'], label=f'Val {metric.capitalize()}')
-        plt.title(f'Model {metric.capitalize()}')
-        plt.xlabel('Epoch')
-        plt.ylabel(metric.capitalize())
-        plt.legend()
-        plt.savefig(os.path.join(output_dir, f'{metric}.png'))
-        plt.close()
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Train Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'training_history.png'))
+    plt.close()
 
     # Save model parameters to a text file
     with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
