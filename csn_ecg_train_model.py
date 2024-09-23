@@ -5,7 +5,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MultiLabelBinarizer
 from sklearn.utils import class_weight
 from tensorflow import keras
 from datetime import datetime
@@ -65,7 +65,17 @@ def main():
     max_records = 5000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
     csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path)
+
+    # Specify the conditions you want to classify
+    selected_conditions = [
+        'Sinus Rhythm',
+        'Atrial Fibrillation',
+        'Atrial Flutter',
+        'Sinus Bradycardia',
+        'Sinus Tachycardia'
+    ]
+
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, selected_conditions)
     X, Y_cl = load_csn_data(wfdb_dir, data_entries, snomed_ct_mapping, max_records=max_records)
 
     if X.size == 0 or Y_cl.size == 0:
@@ -75,34 +85,34 @@ def main():
     # Print data summary
     print(f"Loaded data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
     print(f"Unique SNOMED-CT codes: {np.unique(Y_cl)}")
-    print(f"SNOMED-CT code distribution: {dict(Counter(Y_cl))}")
+    print(f"SNOMED-CT code distribution: {dict(Counter([code for sublist in Y_cl for code in sublist]))}")
 
-    # Handle unknown SNOMED-CT codes
-    unknown_codes = [code for code in np.unique(Y_cl) if code not in snomed_ct_mapping]
-    for code in unknown_codes:
-        snomed_ct_mapping[code] = f"Unknown_{code}"
+    # Handle unknown SNOMED-CT codes are already mapped to 'Unknown' during preprocessing
 
     # Analyze class distribution
-    class_counts = Counter(Y_cl)
+    # Flatten Y_cl for counting
+    flat_Y = [code for sublist in Y_cl for code in sublist]
+    class_counts = Counter(flat_Y)
     print("Class distribution:", dict(class_counts))
 
     # Filter out classes with less than 10 samples
     min_samples_per_class = 10
-    valid_classes = [cls for cls, count in class_counts.items() if count >= min_samples_per_class]
-    
-    mask = np.isin(Y_cl, valid_classes)
-    X = np.array(X)[mask]
-    Y_cl = np.array(Y_cl)[mask]
+    valid_classes = {cls for cls, count in class_counts.items() if count >= min_samples_per_class}
 
-    print(f"Filtered data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
-    print("Filtered class distribution:", dict(Counter(Y_cl)))
+    # Include 'Unknown' only if it has sufficient samples
+    if 'Unknown' in class_counts and class_counts['Unknown'] < min_samples_per_class:
+        valid_classes.discard('Unknown')
 
-    # Create label mappings (map SNOMED-CT codes to unique integers)
-    unique_labels = np.unique(Y_cl)
-    label2Num = {label: idx for idx, label in enumerate(unique_labels)}
-    Num2Label = {idx: label for idx, label in enumerate(unique_labels)}
+    # Binarize the labels for multi-label classification
+    mlb = MultiLabelBinarizer(classes=sorted(valid_classes))
+    Y_binarized = mlb.fit_transform(Y_cl)
 
-    # Debug: Print first 10 label mappings
+    # Update snomed_ct_mapping to include only valid classes
+    label_names = mlb.classes_
+    Num2Label = {idx: label for idx, label in enumerate(label_names)}
+    label2Num = {label: idx for idx, label in enumerate(label_names)}
+    num_classes = len(label_names)
+
     print("\nLabel to Number Mapping (first 10):")
     for label, num in list(label2Num.items())[:10]:
         print(f"{label}: {num}")
@@ -111,12 +121,6 @@ def main():
     for num, label in list(Num2Label.items())[:10]:
         print(f"{num}: {label}")
 
-    # Update Y_cl to use numeric labels
-    Y_cl = np.array([label2Num[y] for y in Y_cl])
-
-    # Define num_classes
-    num_classes = len(label2Num)
-
     print(f"\nNumber of Classes: {num_classes}")
 
     # Split the data into train, validation, and test sets (before scaling)
@@ -124,7 +128,7 @@ def main():
     val_size = 0.25  # 25% of the remaining 80% = 20% of total
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, Y_cl, test_size=test_size, random_state=42, stratify=Y_cl
+        X, Y_binarized, test_size=test_size, random_state=42, stratify=Y_binarized
     )
 
     X_train, X_valid, y_train, y_valid = train_test_split(
@@ -154,40 +158,42 @@ def main():
     print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
     print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
 
-    # One-Hot Encode labels
-    y_nn_train = keras.utils.to_categorical(y_train, num_classes)
-    y_nn_valid = keras.utils.to_categorical(y_valid, num_classes)
-    y_nn_test = keras.utils.to_categorical(y_test, num_classes)
-
     # Compute class weights for imbalanced dataset
-    class_weights = class_weight.compute_class_weight(
-        'balanced', classes=np.unique(y_train), y=y_train
-    )
-    class_weight_dict = dict(enumerate(class_weights))
+    # For multi-label, compute class weights individually
+    class_weights = {}
+    for i, class_label in enumerate(label_names):
+        weights = class_weight.compute_class_weight(
+            'balanced', classes=[0,1], y=y_train[:, i]
+        )
+        class_weights[i] = weights[1]  # Weight for class 1
 
     # Build the neural network model
     if model_type == 'cnn':
         model = build_cnn(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
+            activation='sigmoid',  # For multi-label
             **model_params
         )
     elif model_type == 'resnet18':
         model = build_resnet18_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
+            activation='sigmoid',  # For multi-label
             l2_reg=model_params['l2_reg']
         )
     elif model_type == 'resnet34':
         model = build_resnet34_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
+            activation='sigmoid',  # For multi-label
             l2_reg=model_params['l2_reg']
         )
     elif model_type == 'resnet50':
         model = build_resnet50_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
+            activation='sigmoid',  # For multi-label
             l2_reg=model_params['l2_reg']
         )
     else:
@@ -195,7 +201,7 @@ def main():
 
     # Compile the model
     model.compile(
-        loss='categorical_crossentropy',
+        loss='binary_crossentropy',  # For multi-label
         optimizer=keras.optimizers.Adam(1e-4),
         metrics=['accuracy']
     )
@@ -216,18 +222,19 @@ def main():
 
     # Train the model using scaled data
     history = model.fit(
-        X_train_scaled, y_nn_train, 
+        X_train_scaled, y_train, 
         epochs=30, 
-        validation_data=(X_valid_scaled, y_nn_valid),
+        validation_data=(X_valid_scaled, y_valid),
         batch_size=256, 
         shuffle=True, 
         callbacks=callbacks, 
-        class_weight=class_weight_dict
+        class_weight=class_weights
     )
 
     # Define evaluation function
     def evaluate_model(dataset, y_true, name):
-        y_pred = np.argmax(model.predict(dataset), axis=1)
+        y_pred_prob = model.predict(dataset)
+        y_pred = (y_pred_prob >= 0.5).astype(int)
         print(f"\n{name} Performance")
         print_stats(y_pred, y_true)
         showConfusionMatrix(
