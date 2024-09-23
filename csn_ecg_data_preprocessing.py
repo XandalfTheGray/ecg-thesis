@@ -8,6 +8,7 @@ from scipy.io import loadmat
 import wfdb
 import logging
 import pandas as pd
+import matplotlib.pyplot as plt  # Import matplotlib for plotting
 
 # Uncomment the following line to enable detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,7 +72,33 @@ def pad_ecg_data(ecg_data, desired_length):
         ecg_padded = ecg_data[:desired_length, :]
     return ecg_padded
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000):
+def plot_ecg_signal(ecg_signal, record_name, plot_dir):
+    """
+    Plot and save an ECG signal.
+    
+    Args:
+    ecg_signal (np.ndarray): ECG data array with shape (time_steps, leads).
+    record_name (str): Name of the ECG record.
+    plot_dir (str): Directory where the plot will be saved.
+    """
+    plt.figure(figsize=(15, 5))
+    for lead in range(ecg_signal.shape[1]):
+        plt.plot(ecg_signal[:, lead], label=f'Lead {lead+1}')
+    plt.title(f'ECG Signal for Record: {record_name}')
+    plt.xlabel('Time Steps')
+    plt.ylabel('Amplitude')
+    plt.legend(loc='upper right', ncol=4, fontsize='small')
+    plt.tight_layout()
+    
+    # Create the plot directory if it doesn't exist
+    os.makedirs(plot_dir, exist_ok=True)
+    
+    # Save the plot with a simplified filename
+    simplified_name = record_name.replace('\\', '_').replace('/', '_')
+    plt.savefig(os.path.join(plot_dir, f'{simplified_name}.png'))
+    plt.close()
+
+def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots=5, plot_dir='output_plots/test_ecg_plots/'):
     """
     Load and preprocess ECG data from the CSN dataset.
     
@@ -81,6 +108,8 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to full names.
     max_records (int, optional): Maximum number of records to process.
     desired_length (int): The fixed number of time steps for ECG data.
+    num_plots (int): Number of ECG signals to plot.
+    plot_dir (str): Directory where ECG plots will be saved.
     
     Returns:
     tuple: Numpy array of processed ECG data (X) and list of corresponding SNOMED-CT codes (Y_cl).
@@ -92,23 +121,27 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     no_code_count = 0
     missing_code_count = 0
     missing_codes = set()
-
+    
+    # Create plot directory if it doesn't exist
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    
     logging.info(f"Starting to process data. Max records: {max_records}")
     logging.info(f"Number of data entries: {len(data_entries)}")
-
+    
     if max_records is not None:
         random.seed(42)  # For reproducibility
         data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
-
+    
     for record in data_entries:
         mat_file = os.path.join(database_path, record + '.mat')
         hea_file = os.path.join(database_path, record + '.hea')
-
+    
         if not os.path.exists(mat_file) or not os.path.exists(hea_file):
             logging.warning(f"Files not found for record {record}")
             skipped_records += 1
             continue
-
+    
         try:
             # Load ECG data from .mat file
             mat_data = loadmat(mat_file)
@@ -117,22 +150,22 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                 skipped_records += 1
                 continue
             ecg_data = mat_data['val']
-
+    
             # Verify ECG data dimensions
             if ecg_data.ndim != 2:
                 logging.warning(f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}")
                 skipped_records += 1
                 continue
-
+    
             # Read header file to get the SNOMED-CT codes
             record_header = wfdb.rdheader(os.path.join(database_path, record))
             snomed_ct_codes = extract_snomed_ct_codes(record_header)
-
+    
             if not snomed_ct_codes:
                 no_code_count += 1
                 logging.warning(f"No SNOMED-CT codes found for record {record}")
                 continue
-
+    
             # Map codes to their full names, handle unknown codes
             valid_codes = []
             for code in snomed_ct_codes:
@@ -145,21 +178,26 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                     diagnosis_counts['Unknown'] = diagnosis_counts.get('Unknown', 0) + 1
                     missing_code_count += 1
                     missing_codes.add(code)
-
+    
             # Process ECG data with padding
             ecg_padded = pad_ecg_data(ecg_data.T, desired_length)  # Shape: (desired_length, leads)
             X.append(ecg_padded)  # Shape: (desired_length, leads)
             Y_cl.append(valid_codes)
-
+    
+            # Plot ECG signal if under the plot limit
+            if processed_records < num_plots:
+                plot_ecg_signal(ecg_padded, record, plot_dir)
+                logging.info(f"Plotted ECG signal for record {record}")
+    
             processed_records += 1
-
+    
             if processed_records % 100 == 0:
                 logging.info(f"Processed {processed_records} records")
-
+    
         except Exception as e:
             logging.error(f"Error processing record {record}: {str(e)}")
             skipped_records += 1
-
+    
     # Log summary statistics
     logging.info(f"Processed {processed_records} records")
     logging.info(f"Skipped {skipped_records} records")
@@ -167,9 +205,77 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     logging.info(f"Records with missing SNOMED-CT codes in mapping: {missing_code_count}")
     logging.info(f"Missing SNOMED-CT codes: {missing_codes}")
     logging.info(f"Diagnosis counts: {diagnosis_counts}")
-
+    
     if len(X) == 0:
         logging.error("No data was processed successfully")
         return np.array([]), []
-
+    
     return np.array(X), Y_cl
+
+def main():
+    """
+    Main function to demonstrate the usage of the data preprocessing functions.
+    """
+    # Set up logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # Paths
+    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+                                 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
+                                 'WFDBRecords')
+    csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+                            'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
+                            'ConditionNames_SNOMED-CT.csv')
+
+    # Specify the conditions you want to classify
+    selected_conditions = [
+        'Sinus Rhythm',
+        'Atrial Fibrillation',
+        'Atrial Flutter',
+        'Sinus Bradycardia',
+        'Sinus Tachycardia'
+    ]
+
+    # Load SNOMED-CT mapping with selected conditions
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, selected_conditions)
+
+    # Get all record names
+    data_entries = []
+    for subdir, dirs, files in os.walk(database_path):
+        for file in files:
+            if file.endswith('.mat'):
+                record_path = os.path.join(subdir, file)
+                record_name = os.path.relpath(record_path, database_path)
+                record_name = os.path.splitext(record_name)[0]
+                data_entries.append(record_name)
+
+    # Load data with plotting
+    X, Y_cl = load_data(
+        database_path, 
+        data_entries, 
+        snomed_ct_mapping, 
+        max_records=5000, 
+        desired_length=5000, 
+        num_plots=5,
+        plot_dir='output_plots/test_ecg_plots/'
+    )
+
+    # Print summary
+    print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
+    unique_codes = set(code for sublist in Y_cl for code in sublist)
+    print(f"Unique SNOMED-CT codes: {unique_codes}")
+
+    # Display a sample plot
+    if len(X) > 0:
+        plt.figure(figsize=(15, 5))
+        for lead in range(X[0].shape[1]):
+            plt.plot(X[0][:, lead], label=f'Lead {lead+1}')
+        plt.title(f'Sample ECG Signal')
+        plt.xlabel('Time Steps')
+        plt.ylabel('Amplitude')
+        plt.legend(loc='upper right', ncol=4, fontsize='small')
+        plt.tight_layout()
+        plt.show()
+
+if __name__ == '__main__':
+    main()
