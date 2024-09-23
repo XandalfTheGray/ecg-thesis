@@ -22,19 +22,24 @@ def main():
     # Setup parameters
     base_output_dir = 'output_plots'
     dataset_name = 'csn_ecg'
-    model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50'
+    model_type = 'resnet18'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50'
 
     # Create a unique output directory
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{current_time}")
     os.makedirs(output_dir, exist_ok=True)
     
-    # Define model parameters
+    # Define model parameters for ResNet18
     model_params = {
-        'l2_reg': 0.001,
-        'filters': (32, 64, 128),
-        'kernel_sizes': (3, 3, 3),
-        'dropout_rates': (0.1, 0.1, 0.1, 0.5)
+        'l2_reg': 0.001,  # L2 regularization factor
+        'dropout_rate': 0.3,  # Dropout rate
+        'initial_filters': 64,  # Number of filters in the first convolutional layer
+        'filter_multiplier': 2,  # Factor by which the number of filters increases in each block
+        'num_blocks': [2, 2, 2, 2],  # Number of residual blocks in each stage
+        'use_batch_norm': True,  # Whether to use batch normalization
+        'pool_size': 2,  # Pooling size for max pooling layers
+        'dense_units': 256,  # Number of units in the dense layer before the output
+        'learning_rate': 1e-3,  # Initial learning rate
     }
     
     # Set up paths for the CSN ECG dataset
@@ -241,7 +246,7 @@ def main():
     # Compile the model
     model.compile(
         loss='binary_crossentropy',  # For multi-label
-        optimizer=keras.optimizers.Adam(1e-4),
+        optimizer=keras.optimizers.Adam(model_params['learning_rate']),
         metrics=['accuracy']
     )
 

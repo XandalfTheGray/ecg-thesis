@@ -178,3 +178,5 @@ output_plots_roshancnn/
 # helper functions
 extract_record_structure.py
 text_files.py
+create_ms_word_appendix.py
+code_appendix.html
