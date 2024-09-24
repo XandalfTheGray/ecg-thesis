@@ -66,7 +66,7 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 400
+    max_records = 5000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
     csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
 
