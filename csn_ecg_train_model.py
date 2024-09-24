@@ -12,6 +12,7 @@ from datetime import datetime
 from collections import Counter
 from sklearn.metrics import multilabel_confusion_matrix, classification_report
 import seaborn as sns
+import sys
 
 # Import models and evaluation functions
 from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d, build_transformer
@@ -20,11 +21,23 @@ from evaluation import print_stats, showConfusionMatrix
 # Import data preprocessing functions
 from csn_ecg_data_preprocessing import load_data as load_csn_data, load_snomed_ct_mapping
 
+def setup_environment():
+    if 'google.colab' in sys.modules:
+        from google.colab import drive
+        drive.mount('/content/drive')
+        base_path = '/content/drive/MyDrive/ecg_thesis_data/'
+    else:
+        base_path = ''
+    return base_path
+
 def main():
+    # Setup environment and get base path
+    base_path = setup_environment()
+
     # Setup parameters
-    base_output_dir = 'output_plots'
+    base_output_dir = os.path.join(base_path, 'output_plots')
     dataset_name = 'csn_ecg'
-    model_type = 'transformer'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
+    model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
     # Create a unique output directory
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -54,7 +67,7 @@ def main():
         }
 
     # Set up paths for the CSN ECG dataset
-    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                  'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
     wfdb_dir = os.path.join(database_path, 'WFDBRecords')
     
