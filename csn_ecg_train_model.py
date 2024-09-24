@@ -14,7 +14,7 @@ from sklearn.metrics import multilabel_confusion_matrix, classification_report
 import seaborn as sns
 
 # Import models and evaluation functions
-from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
+from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d, build_transformer
 from evaluation import print_stats, showConfusionMatrix
 
 # Import data preprocessing functions
@@ -24,21 +24,34 @@ def main():
     # Setup parameters
     base_output_dir = 'output_plots'
     dataset_name = 'csn_ecg'
-    model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50'
+    model_type = 'transformer'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
     # Create a unique output directory
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{current_time}")
     os.makedirs(output_dir, exist_ok=True)
     
-    # Define model parameters for CNN
-    model_params = {
-        'l2_reg': 0.001,  # L2 regularization factor
-        'filters': [32, 64, 128],  # Number of filters for each convolutional layer
-        'kernel_sizes': [5, 5, 5],  # Kernel sizes for each convolutional layer
-        'dropout_rates': [0.3, 0.3, 0.3, 0.3],  # Dropout rates for each layer
-        'learning_rate': 1e-3,  # Initial learning rate
-    }
+    # Define base model parameters
+    learning_rate = 1e-3
+
+    # Define model-specific parameters
+    if model_type == 'transformer':
+        model_params = {
+            'head_size': 256,
+            'num_heads': 4,
+            'ff_dim': 4,
+            'num_transformer_blocks': 4,
+            'mlp_units': [128],
+            'mlp_dropout': 0.4,
+            'dropout': 0.25,
+        }
+    else:
+        model_params = {
+            'l2_reg': 0.001,
+            'filters': [32, 64, 128],
+            'kernel_sizes': [5, 5, 5],
+            'dropout_rates': [0.3, 0.3, 0.3, 0.3],
+        }
 
     # Set up paths for the CSN ECG dataset
     database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
@@ -225,13 +238,20 @@ def main():
             activation='sigmoid',  # For multi-label
             **model_params
         )
+    elif model_type == 'transformer':
+        model = build_transformer(
+            input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
+            num_classes=num_classes,
+            activation='sigmoid',  # For multi-label
+            **model_params
+        )
     else:
         raise ValueError("Invalid model type.")
 
     # Compile the model
     model.compile(
         loss='binary_crossentropy',  # For multi-label
-        optimizer=keras.optimizers.Adam(model_params['learning_rate']),
+        optimizer=keras.optimizers.Adam(learning_rate),
         metrics=['accuracy']
     )
 
