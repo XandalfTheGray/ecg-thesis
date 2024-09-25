@@ -13,26 +13,60 @@ from collections import Counter
 from sklearn.metrics import multilabel_confusion_matrix, classification_report
 import seaborn as sns
 import sys
-
-# Import models and evaluation functions
-from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d, build_transformer
-from evaluation import print_stats, showConfusionMatrix
-
-# Import data preprocessing functions
-from csn_ecg_data_preprocessing import load_data as load_csn_data, load_snomed_ct_mapping
+import importlib.util
 
 def setup_environment():
     if 'google.colab' in sys.modules:
         from google.colab import drive
-        drive.mount('/content/drive')
-        base_path = '/content/drive/MyDrive/content/ecg-thesis/'
+        drive.mount('/content/drive', force_remount=True)
+        base_path = '/content/drive/MyDrive/content/ecg_thesis_data/'
+        print('GOOGLE COLAB ENVIRONMENT DETECTED')
     else:
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Assuming the script is in the root directory of your project
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        print('LOCAL ENVIRONMENT DETECTED')
+    
+    print(f'Base Path: {base_path}')
+    
+    # Add the current directory to the Python path
+    if base_path not in sys.path:
+        sys.path.append(base_path)
+    
+    # Additional environment checks
+    print(f"Python version: {sys.version}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Contents of current directory: {os.listdir('.')}")
+    print(f"Python path: {sys.path}")
+    
     return base_path
+
+def import_module(module_name):
+    try:
+        return importlib.import_module(module_name)
+    except ImportError:
+        print(f"Error importing {module_name}. Make sure the file is in the correct directory.")
+        sys.exit(1)
 
 def main():
     # Setup environment and get base path
     base_path = setup_environment()
+    print(f"Base path set to: {base_path}")
+
+    # Import required modules
+    models = import_module('models')
+    evaluation = import_module('evaluation')
+    csn_ecg_data_preprocessing = import_module('csn_ecg_data_preprocessing')
+
+    # Now you can use the imported modules
+    build_cnn = models.build_cnn
+    build_resnet18_1d = models.build_resnet18_1d
+    build_resnet34_1d = models.build_resnet34_1d
+    build_resnet50_1d = models.build_resnet50_1d
+    build_transformer = models.build_transformer
+    print_stats = evaluation.print_stats
+    showConfusionMatrix = evaluation.showConfusionMatrix
+    load_csn_data = csn_ecg_data_preprocessing.load_data
+    load_snomed_ct_mapping = csn_ecg_data_preprocessing.load_snomed_ct_mapping
 
     # Setup parameters
     base_output_dir = os.path.join(base_path, 'output_plots')
@@ -65,6 +99,8 @@ def main():
             'kernel_sizes': [5, 5, 5],
             'dropout_rates': [0.3, 0.3, 0.3, 0.3],
         }
+
+
 
     # Set up paths for the CSN ECG dataset
     database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
