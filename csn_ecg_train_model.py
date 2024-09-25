@@ -15,14 +15,13 @@ import seaborn as sns
 import sys
 import importlib.util
 
-def setup_environment():
-    if 'google.colab' in sys.modules:
+def setup_environment(is_colab=False):
+    if is_colab:
         from google.colab import drive
         drive.mount('/content/drive', force_remount=True)
         base_path = '/content/drive/MyDrive/content/ecg_thesis_data/'
         print('GOOGLE COLAB ENVIRONMENT DETECTED')
     else:
-        # Assuming the script is in the root directory of your project
         base_path = os.path.dirname(os.path.abspath(__file__))
         print('LOCAL ENVIRONMENT DETECTED')
     
@@ -38,6 +37,15 @@ def setup_environment():
     print(f"Contents of current directory: {os.listdir('.')}")
     print(f"Python path: {sys.path}")
     
+    # Check for dataset existence
+    dataset_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
+    if not os.path.exists(dataset_path):
+        print(f"WARNING: Dataset not found at {dataset_path}")
+        print("Please ensure the CSN ECG dataset is in the correct directory.")
+        print("Expected path:", dataset_path)
+    else:
+        print(f"Dataset found at: {dataset_path}")
+    
     return base_path
 
 def import_module(module_name):
@@ -49,7 +57,8 @@ def import_module(module_name):
 
 def main():
     # Setup environment and get base path
-    base_path = setup_environment()
+    is_colab = False  # Set this to True if you're running in Colab
+    base_path = setup_environment(is_colab)
     print(f"Base path set to: {base_path}")
 
     # Import required modules
