@@ -19,7 +19,7 @@ def setup_environment(is_colab=False):
     if is_colab:
         from google.colab import drive
         drive.mount('/content/drive', force_remount=True)
-        base_path = '/content/drive/MyDrive/content/ecg_thesis_data/'
+        base_path = '/content/drive/MyDrive/ecg_thesis_data/'
         print('GOOGLE COLAB ENVIRONMENT DETECTED')
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
@@ -57,7 +57,7 @@ def import_module(module_name):
 
 def main():
     # Setup environment and get base path
-    is_colab = False  # Set this to True if you're running in Colab
+    is_colab = True  # Set this to True if you're running in Colab
     base_path = setup_environment(is_colab)
     print(f"Base path set to: {base_path}")
 
