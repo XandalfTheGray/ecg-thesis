@@ -55,7 +55,7 @@ def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
 
-def main(time_steps):
+def main(time_steps, batch_size, model_type):
     # Set up the environment and get the base path
     base_path = setup_environment()
     print(f"Base path set to: {base_path}")
@@ -77,10 +77,9 @@ def main(time_steps):
     # Set up output directories and model parameters
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csn_ecg'
-    model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{current_time}")
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch_{current_time}")
     os.makedirs(output_dir, exist_ok=True)
     
     learning_rate = 1e-3
@@ -221,7 +220,6 @@ def main(time_steps):
     print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
     print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
 
-    batch_size = 128
     train_dataset = create_dataset(X_train_scaled, y_train, batch_size=batch_size)
     valid_dataset = create_dataset(X_valid_scaled, y_valid, batch_size=batch_size, shuffle=False)
     test_dataset = create_dataset(X_test_scaled, y_test, batch_size=batch_size, shuffle=False)
@@ -321,6 +319,7 @@ def main(time_steps):
         f.write(f"Dataset: {dataset_name}\n")
         f.write(f"Model Type: {model_type}\n")
         f.write(f"Time Steps: {time_steps}\n")
+        f.write(f"Batch Size: {batch_size}\n")
         for key, value in model_params.items():
             f.write(f"  {key}: {value}\n")
 
@@ -363,5 +362,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a neural network model on the preprocessed CSN ECG dataset.')
     parser.add_argument('--time_steps', type=int, choices=[500, 1000, 2000, 5000], required=True, 
                         help='Number of time steps in the preprocessed data.')
+    parser.add_argument('--batch_size', type=int, default=128, 
+                        help='Batch size for training (default: 128)')
+    parser.add_argument('--model_type', type=str, choices=['cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'], 
+                        default='cnn', help='Type of model to train (default: cnn)')
     args = parser.parse_args()
-    main(args.time_steps)
+    main(args.time_steps, args.batch_size, args.model_type)
