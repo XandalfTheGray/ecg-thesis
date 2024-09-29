@@ -17,6 +17,7 @@ import importlib.util
 import tensorflow as tf
 from tensorflow.keras import mixed_precision
 from google.colab import drive
+import argparse
 
 # Enable mixed precision for better performance on GPUs
 policy = mixed_precision.Policy('mixed_float16')
@@ -31,13 +32,6 @@ def setup_environment():
     # Add the base path to sys.path to allow importing custom modules
     if base_path not in sys.path:
         sys.path.append(base_path)
-    
-    # Check for the existence of preprocessed data
-    dataset_path = os.path.join(base_path, 'csnecg_preprocessed_data')
-    if not os.path.exists(dataset_path):
-        print(f"WARNING: Preprocessed data not found at {dataset_path}")
-    else:
-        print(f"Preprocessed data found at: {dataset_path}")
     
     return base_path
 
@@ -59,7 +53,7 @@ def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
 
-def main():
+def main(time_steps):
     # Set up the environment and get the base path
     base_path = setup_environment()
     print(f"Base path set to: {base_path}")
@@ -84,7 +78,7 @@ def main():
     model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{current_time}")
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{current_time}")
     os.makedirs(output_dir, exist_ok=True)
     
     learning_rate = 1e-3
@@ -108,13 +102,14 @@ def main():
             'dropout_rates': [0.3, 0.3, 0.3, 0.3],
         }
 
-    # Load preprocessed data
+    # Load preprocessed data for the specified time steps
     try:
-        X = np.load(os.path.join(base_path, 'csnecg_preprocessed_data/X.npy'))
-        Y_cl = np.load(os.path.join(base_path, 'csnecg_preprocessed_data/Y.npy'), allow_pickle=True)
+        data_dir = os.path.join(base_path, 'csnecg_preprocessed_data', f'{time_steps}_signal_time_steps')
+        X = np.load(os.path.join(data_dir, 'X.npy'))
+        Y_cl = np.load(os.path.join(data_dir, 'Y.npy'), allow_pickle=True)
     except FileNotFoundError as e:
         print(f"Error: {e}")
-        print("Ensure that the preprocessed data is in the 'csnecg_preprocessed_data' folder in your Google Drive.")
+        print(f"Ensure that the preprocessed data for {time_steps} time steps exists in the 'csnecg_preprocessed_data' folder in your Google Drive.")
         sys.exit(1)
 
     # Print data summary
@@ -224,13 +219,11 @@ def main():
     print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
     print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
 
-    # Create TensorFlow datasets
-    batch_size = 128  # Increased batch size
+    batch_size = 128
     train_dataset = create_dataset(X_train_scaled, y_train, batch_size=batch_size)
     valid_dataset = create_dataset(X_valid_scaled, y_valid, batch_size=batch_size, shuffle=False)
     test_dataset = create_dataset(X_test_scaled, y_test, batch_size=batch_size, shuffle=False)
 
-    # Compute class weights for imbalanced dataset
     class_weights = {}
     for i, class_label in enumerate(label_names):
         class_count = y_train[:, i].sum()
@@ -239,53 +232,50 @@ def main():
         else:
             class_weights[i] = (len(y_train) / (num_classes * class_count))
 
-    # Build the neural network model
     if model_type == 'cnn':
         model = build_cnn(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
+            activation='sigmoid',
             **model_params
         )
     elif model_type == 'resnet18':
         model = build_resnet18_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
+            activation='sigmoid',
             **model_params
         )
     elif model_type == 'resnet34':
         model = build_resnet34_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
+            activation='sigmoid',
             **model_params
         )
     elif model_type == 'resnet50':
         model = build_resnet50_1d(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
+            activation='sigmoid',
             **model_params
         )
     elif model_type == 'transformer':
         model = build_transformer(
             input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
             num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
+            activation='sigmoid',
             **model_params
         )
     else:
         raise ValueError("Invalid model type.")
 
-    # Compile the model
     model.compile(
-        loss='binary_crossentropy',  # For multi-label
+        loss='binary_crossentropy',
         optimizer=keras.optimizers.Adam(learning_rate),
         metrics=['accuracy']
     )
 
-    # Define callbacks for training
     callbacks = [
         keras.callbacks.ReduceLROnPlateau(
             monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
@@ -299,7 +289,6 @@ def main():
         )
     ]
 
-    # Train the model
     history = model.fit(
         train_dataset,
         epochs=30,
@@ -308,13 +297,11 @@ def main():
         class_weight=class_weights
     )
 
-    # Evaluate the model
     print("\nEvaluating the model on the test set:")
     test_loss, test_accuracy = model.evaluate(test_dataset)
     print(f"Test Loss: {test_loss:.4f}")
     print(f"Test Accuracy: {test_accuracy:.4f}")
 
-    # Generate predictions and classification report
     y_pred = model.predict(test_dataset)
     y_pred_classes = (y_pred > 0.5).astype(int)
 
@@ -323,16 +310,15 @@ def main():
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred_classes, target_names=label_names))
 
-    # Plot confusion matrices and training history
     plot_confusion_matrices(y_test, y_pred_classes, label_names, output_dir)
     plot_training_history(history, output_dir)
 
     print(f"\nTraining completed. Results saved in {output_dir}")
 
-    # Save model parameters
     with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
         f.write(f"Dataset: {dataset_name}\n")
         f.write(f"Model Type: {model_type}\n")
+        f.write(f"Time Steps: {time_steps}\n")
         for key, value in model_params.items():
             f.write(f"  {key}: {value}\n")
 
@@ -372,4 +358,7 @@ def plot_training_history(history, output_dir):
     plt.close()
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Train a neural network model on the preprocessed CSN ECG dataset.')
+    parser.add_argument('--time_steps', type=int, required=True, help='Number of time steps in the preprocessed data.')
+    args = parser.parse_args()
+    main(args.time_steps)

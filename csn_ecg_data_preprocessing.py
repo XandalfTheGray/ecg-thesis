@@ -9,7 +9,6 @@ import wfdb
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
-from google.colab import drive
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -83,142 +82,136 @@ def plot_ecg_signal(ecg_signal, record_name, plot_dir, class_names):
     plt.savefig(os.path.join(plot_dir, f'{simplified_name}.png'))
     plt.close()
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots_per_class=1, plot_dir='csnecg_output_plots/class_ecg_plots/'):
+def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_lengths=[500, 1000, 2000], num_plots_per_class=1, plot_dir='output_plots/class_ecg_plots/'):
     """
     Load and preprocess ECG data from the CSN dataset and save to disk.
     """
-    X, Y_cl = [], []
-    processed_records = 0
-    skipped_records = 0
-    diagnosis_counts = {}
-    no_code_count = 0
-    plotted_classes = set()
-    
-    if not os.path.exists(plot_dir):
-        os.makedirs(plot_dir)
-    
-    logging.info(f"Starting to process data. Max records: {max_records}")
-    logging.info(f"Number of data entries: {len(data_entries)}")
-    
-    if max_records is not None:
-        random.seed(42)
-        data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
-    
-    for i, record in enumerate(data_entries):
-        mat_file = os.path.join(database_path, record + '.mat')
-        hea_file = os.path.join(database_path, record + '.hea')
-    
-        if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-            logging.warning(f"Files not found for record {record}")
-            skipped_records += 1
-            continue
-    
-        try:
-            mat_data = loadmat(mat_file)
-            if 'val' not in mat_data:
-                logging.warning(f"'val' key not found in mat file for record {record}")
+    for desired_length in desired_lengths:
+        X, Y_cl = [], []
+        processed_records = 0
+        skipped_records = 0
+        diagnosis_counts = {}
+        no_code_count = 0
+        plotted_classes = set()
+        
+        if not os.path.exists(plot_dir):
+            os.makedirs(plot_dir)
+        
+        logging.info(f"Starting to process data for {desired_length} time steps. Max records: {max_records}")
+        logging.info(f"Number of data entries: {len(data_entries)}")
+        
+        if max_records is not None:
+            random.seed(42)
+            data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
+        
+        for i, record in enumerate(data_entries):
+            mat_file = os.path.join(database_path, record + '.mat')
+            hea_file = os.path.join(database_path, record + '.hea')
+        
+            if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+                logging.warning(f"Files not found for record {record}")
                 skipped_records += 1
                 continue
-            ecg_data = mat_data['val']
-    
-            if ecg_data.ndim != 2:
-                logging.warning(f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}")
-                skipped_records += 1
-                continue
-    
-            # Attempt to read the header; handle date parsing errors
+        
             try:
-                record_header = wfdb.rdheader(os.path.join(database_path, record))
-            except ValueError as ve:
-                logging.error(f"Error processing record {record}: {str(ve)}")
-                skipped_records += 1
-                continue
+                mat_data = loadmat(mat_file)
+                if 'val' not in mat_data:
+                    logging.warning(f"'val' key not found in mat file for record {record}")
+                    skipped_records += 1
+                    continue
+                ecg_data = mat_data['val']
+        
+                if ecg_data.ndim != 2:
+                    logging.warning(f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}")
+                    skipped_records += 1
+                    continue
+        
+                # Attempt to read the header; handle date parsing errors
+                try:
+                    record_header = wfdb.rdheader(os.path.join(database_path, record))
+                except ValueError as ve:
+                    logging.error(f"Error processing record {record}: {str(ve)}")
+                    skipped_records += 1
+                    continue
+                except Exception as e:
+                    logging.error(f"Unexpected error processing record {record}: {str(e)}")
+                    skipped_records += 1
+                    continue
+        
+                snomed_ct_codes = extract_snomed_ct_codes(record_header)
+        
+                if not snomed_ct_codes:
+                    no_code_count += 1
+                    logging.warning(f"No SNOMED-CT codes found for record {record}")
+                    continue
+        
+                valid_classes = []
+                for code in snomed_ct_codes:
+                    if code in snomed_ct_mapping:
+                        class_name = snomed_ct_mapping[code]
+                        valid_classes.append(class_name)
+                        diagnosis_counts[class_name] = diagnosis_counts.get(class_name, 0) + 1
+                    else:
+                        valid_classes.append('Other')
+                        diagnosis_counts['Other'] = diagnosis_counts.get('Other', 0) + 1
+        
+                # Remove duplicates and 'Other' if there are other valid classes
+                valid_classes = list(set(valid_classes))
+                if len(valid_classes) > 1 and 'Other' in valid_classes:
+                    valid_classes.remove('Other')
+        
+                ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
+                X.append(ecg_padded)
+                Y_cl.append(valid_classes)
+        
+                # Plot ECG signals per class
+                for cls in valid_classes:
+                    if cls not in plotted_classes and list(Y_cl).count(cls) <= num_plots_per_class:
+                        plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
+                        logging.info(f"Plotted ECG signal for class {cls} in record {record}")
+                        plotted_classes.add(cls)
+        
+                processed_records += 1
+        
+                if processed_records % 100 == 0:
+                    logging.info(f"Processed {processed_records} records")
+        
+                if max_records and processed_records >= max_records:
+                    break
+        
             except Exception as e:
-                logging.error(f"Unexpected error processing record {record}: {str(e)}")
+                logging.error(f"Error processing record {record}: {str(e)}")
                 skipped_records += 1
-                continue
-    
-            snomed_ct_codes = extract_snomed_ct_codes(record_header)
-    
-            if not snomed_ct_codes:
-                no_code_count += 1
-                logging.warning(f"No SNOMED-CT codes found for record {record}")
-                continue
-    
-            valid_classes = []
-            for code in snomed_ct_codes:
-                if code in snomed_ct_mapping:
-                    class_name = snomed_ct_mapping[code]
-                    valid_classes.append(class_name)
-                    diagnosis_counts[class_name] = diagnosis_counts.get(class_name, 0) + 1
-                else:
-                    valid_classes.append('Other')
-                    diagnosis_counts['Other'] = diagnosis_counts.get('Other', 0) + 1
-    
-            # Remove duplicates and 'Other' if there are other valid classes
-            valid_classes = list(set(valid_classes))
-            if len(valid_classes) > 1 and 'Other' in valid_classes:
-                valid_classes.remove('Other')
-    
-            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
-            X.append(ecg_padded)
-            Y_cl.append(valid_classes)
-    
-            # Plot ECG signals per class
-            for cls in valid_classes:
-                if cls not in plotted_classes and list(Y_cl).count(cls) <= num_plots_per_class:
-                    plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
-                    logging.info(f"Plotted ECG signal for class {cls} in record {record}")
-                    plotted_classes.add(cls)
-    
-            processed_records += 1
-    
-            if processed_records % 100 == 0:
-                logging.info(f"Processed {processed_records} records")
-    
-            if max_records and processed_records >= max_records:
-                break
-    
-        except Exception as e:
-            logging.error(f"Error processing record {record}: {str(e)}")
-            skipped_records += 1
-    
-    logging.info(f"Processed {processed_records} records")
-    logging.info(f"Skipped {skipped_records} records")
-    logging.info(f"Records with no SNOMED-CT codes: {no_code_count}")
-    logging.info(f"Diagnosis counts: {diagnosis_counts}")
-    
-    if len(X) == 0:
-        logging.error("No data was processed successfully")
-        return
-    
-    # Convert lists to numpy arrays with dtype=object for Y_cl
-    X = np.array(X)
-    Y_cl = np.array(Y_cl, dtype=object)
-    
-    # Save preprocessed data to disk
-    base_path = '/content/drive/MyDrive'
-    preprocessed_data_dir = os.path.join(base_path, 'csnecg_preprocessed_data')
-    os.makedirs(preprocessed_data_dir, exist_ok=True)  # Ensure the directory exists
-    np.save(os.path.join(preprocessed_data_dir, 'X.npy'), X)
-    np.save(os.path.join(preprocessed_data_dir, 'Y.npy'), Y_cl)
-    logging.info(f"Saved preprocessed data to '{preprocessed_data_dir}' directory")
+        
+        logging.info(f"Processed {processed_records} records")
+        logging.info(f"Skipped {skipped_records} records")
+        logging.info(f"Records with no SNOMED-CT codes: {no_code_count}")
+        logging.info(f"Diagnosis counts: {diagnosis_counts}")
+        
+        if len(X) == 0:
+            logging.error("No data was processed successfully")
+            continue
+        
+        # Convert lists to numpy arrays with dtype=object for Y_cl
+        X = np.array(X)
+        Y_cl = np.array(Y_cl, dtype=object)
+        
+        # Save preprocessed data to disk
+        preprocessed_data_dir = os.path.join('csnecg_preprocessed_data', f'{desired_length}_signal_time_steps')
+        os.makedirs(preprocessed_data_dir, exist_ok=True)
+        np.save(os.path.join(preprocessed_data_dir, 'X.npy'), X)
+        np.save(os.path.join(preprocessed_data_dir, 'Y.npy'), Y_cl)
+        logging.info(f"Saved preprocessed data to '{preprocessed_data_dir}' directory")
 
 def main():
     """
     Main function to preprocess the CSN ECG dataset and save processed data to disk.
     """
-    # Mount Google Drive
-    drive.mount('/content/drive')
-
-    # Set base path to the mounted Google Drive
-    base_path = '/content/drive/MyDrive'
-
     # Paths
-    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                  'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                                  'WFDBRecords')
-    csv_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                             'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                             'ConditionNames_SNOMED-CT.csv')
 
@@ -250,9 +243,9 @@ def main():
         data_entries, 
         snomed_ct_mapping, 
         max_records=45152,  # Set to desired number of records
-        desired_length=500, 
+        desired_lengths=[500, 1000, 2000, 5000],  # Process data for these lengths
         num_plots_per_class=1,
-        plot_dir=os.path.join(base_path, 'csnecg_output_plots/class_ecg_plots/')
+        plot_dir='output_plots/class_ecg_plots/'
     )
 
 if __name__ == '__main__':

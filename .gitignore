@@ -170,7 +170,10 @@ a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0.zip
 a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/
 mit-bih-arrhythmia-database-1.0.0.zip
 mit-bih-arrhythmia-database/
-preprocessed_data/
+csnecg_preprocessed_data/
+
+# old code
+csn_ecg_code/
 
 # output plots
 output_plots/
