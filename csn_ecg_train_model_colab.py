@@ -149,7 +149,8 @@ def main():
     # Gather all record names
     data_entries = []
     if bucket:
-        blobs = list(bucket.list_blobs(prefix=f'{database_path}/'))
+        prefix = f'{database_path}/WFDBRecords/'
+        blobs = list(bucket.list_blobs(prefix=prefix))
         data_entries = [blob.name.split('/')[-1].split('.')[0] for blob in blobs if blob.name.endswith('.mat')]
     else:
         for subdir, dirs, files in os.walk(database_path):
@@ -179,16 +180,24 @@ def main():
         print("Loading SNOMED-CT mapping...")
         snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
         print("SNOMED-CT mapping loaded successfully")
+        print(f"Number of SNOMED-CT codes loaded: {len(snomed_ct_mapping)}")
+        
         print("Starting to load and preprocess ECG data...")
         X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
         print("ECG data loading and preprocessing completed")
+        
+        if X.size == 0 or len(Y_cl) == 0:
+            print("Error: No data was loaded. Check the data preprocessing step.")
+            print(f"X shape: {X.shape}, Y_cl length: {len(Y_cl)}")
+            return
+        
+        print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
+        unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
+        print(f"Unique classes: {unique_classes}")
+        
     except Exception as e:
         print(f"Error during data loading: {str(e)}")
         logging.exception("Exception occurred during data loading")
-        return
-
-    if X.size == 0 or len(Y_cl) == 0:
-        print("Error: No data was loaded. Check the data preprocessing step.")
         return
 
     # Print data summary

@@ -162,11 +162,16 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     logging.info(f"Starting to load data from {len(data_entries)} records")
     
     # Use tqdm to create a progress bar
-    for record in tqdm(data_entries[:max_records], desc="Loading records", unit="record"):
+    for i, record in enumerate(tqdm(data_entries[:max_records], desc="Loading records", unit="record")):
+        if i % 100 == 0:
+            logging.info(f"Processed {i} records so far. Current X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
+        
         logging.info(f"Processing record: {record}")
         if bucket:
-            mat_blob = bucket.blob(f'{record}.mat')
-            hea_blob = bucket.blob(f'{record}.hea')
+            # Construct the full path for .mat and .hea files
+            record_path = f'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/{record}'
+            mat_blob = bucket.blob(f'{record_path}.mat')
+            hea_blob = bucket.blob(f'{record_path}.hea')
             
             if not (mat_blob.exists() and hea_blob.exists()):
                 logging.warning(f"Files not found for record {record}")
@@ -219,12 +224,22 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
         if len(valid_classes) > 1 and 'Other' in valid_classes:
             valid_classes.remove('Other')
 
+        if not valid_classes:
+            logging.warning(f"No valid classes found for record {record}")
+            continue
+
         ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
 
         X.append(ecg_padded)
         Y_cl.append(valid_classes)
 
     logging.info(f"Loaded {len(X)} records successfully")
+    
+    if len(X) == 0:
+        logging.error("No records were successfully loaded. Check the data files and paths.")
+    else:
+        logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
+
     return np.array(X), Y_cl
 
 def find_mat_files(directory):
