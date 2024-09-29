@@ -31,7 +31,7 @@ def setup_environment():
     drive.mount('/content/drive')
 
     # Set the base path to the mounted Google Drive
-    base_path = '/content/drive/MyDrive/your_project_folder'  # Adjust this path as needed
+    base_path = '/content/drive/MyDrive'  # Adjusted to reflect the root of MyDrive
     print(f'Base Path: {base_path}')
     
     # Add the current directory to the Python path
@@ -45,13 +45,13 @@ def setup_environment():
     print(f"Python path: {sys.path}")
     
     # Check for dataset existence
-    dataset_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
+    dataset_path = os.path.join(base_path, 'csnecg_preprocessed_data')
     if not os.path.exists(dataset_path):
-        print(f"WARNING: Dataset not found at {dataset_path}")
-        print("Please ensure the CSN ECG dataset is in the correct directory on your Google Drive.")
+        print(f"WARNING: Preprocessed data not found at {dataset_path}")
+        print("Please ensure the preprocessed CSN ECG data is in the correct directory on your Google Drive.")
         print("Expected path:", dataset_path)
     else:
-        print(f"Dataset found at: {dataset_path}")
+        print(f"Preprocessed data found at: {dataset_path}")
     
     return base_path
 
@@ -104,7 +104,7 @@ def main():
     showConfusionMatrix = evaluation.showConfusionMatrix
 
     # Setup parameters
-    base_output_dir = os.path.join(base_path, 'output_plots')
+    base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csn_ecg'
     model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
@@ -137,11 +137,11 @@ def main():
 
     # Load preprocessed data from disk
     try:
-        X = np.load(os.path.join(base_path, 'preprocessed_data/X.npy'))
-        Y_cl = np.load(os.path.join(base_path, 'preprocessed_data/Y.npy'), allow_pickle=True)
+        X = np.load(os.path.join(base_path, 'csnecg_preprocessed_data/X.npy'))
+        Y_cl = np.load(os.path.join(base_path, 'csnecg_preprocessed_data/Y.npy'), allow_pickle=True)
     except FileNotFoundError as e:
         print(f"Error: {e}")
-        print("Ensure that you have run the preprocessing script `csn_ecg_data_preprocessing.py` successfully.")
+        print("Ensure that the preprocessed data is in the 'csnecg_preprocessed_data' folder in your Google Drive.")
         sys.exit(1)
 
     # Print summary
