@@ -70,7 +70,7 @@ def setup_environment(is_colab=False, bucket_name=None):
     
     return base_path, bucket
 
-def import_module(module_name):
+def import_module_custom(module_name):
     try:
         return importlib.import_module(module_name)
     except ImportError:
@@ -88,20 +88,27 @@ def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
 
 def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, bucket=None):
     X, Y_cl = [], []
-    client = storage.Client()
-    bucket = client.get_bucket(base_path.replace('gs://', ''))
     
     logging.info(f"Starting to load data from {len(data_entries)} records")
     
     # Function to process a single record
     def process_record(record):
-        mat_file = f'{base_path}/WFDBRecords/{record}.mat'
-        hea_file = f'{base_path}/WFDBRecords/{record}.hea'
+        # Correct path construction without 'gs://'
+        record_path = f'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/{record}'
+        mat_file = f'{record_path}.mat'
+        hea_file = f'{record_path}.hea'
 
         try:
-            # Download files from GCS
+            # Access blobs without 'gs://'
             mat_blob = bucket.blob(mat_file)
             hea_blob = bucket.blob(hea_file)
+
+            if not mat_blob.exists():
+                raise FileNotFoundError(f"Mat file not found: {mat_file}")
+            if not hea_blob.exists():
+                raise FileNotFoundError(f"Hea file not found: {hea_file}")
+
+            # Download content
             mat_content = mat_blob.download_as_bytes()
             hea_content = hea_blob.download_as_string().decode('utf-8')
 
@@ -141,7 +148,7 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     if len(X) == 0:
         logging.error("No records were successfully loaded. Check the data files and paths.")
-        return None
+        return None, None
 
     logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
     
@@ -178,14 +185,14 @@ def main():
 
     # Add this after setting up the bucket
     print("Listing contents of the bucket:")
-    blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/'))
-    for blob in blobs[:20]:  # Print first 20 items
+    blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/', max_results=20))
+    for blob in blobs:
         print(blob.name)
 
     # Import required modules
-    models = import_module('models')
-    evaluation = import_module('evaluation')
-    csn_ecg_data_preprocessing_colab = import_module('csn_ecg_data_preprocessing_colab')
+    models = import_module_custom('models')
+    evaluation = import_module_custom('evaluation')
+    csn_ecg_data_preprocessing_colab = import_module_custom('csn_ecg_data_preprocessing_colab')
 
     if not all([models, evaluation, csn_ecg_data_preprocessing_colab]):
         print("Error: One or more required modules could not be imported. Please check the module files and their locations.")
@@ -237,7 +244,7 @@ def main():
     # Set up paths for the CSN ECG dataset
     database_path = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0'
     csv_path = f'{database_path}/ConditionNames_SNOMED-CT.csv'
-    
+
     # Gather all record names
     data_entries = []
     if bucket:
@@ -246,7 +253,8 @@ def main():
         for blob in blobs:
             if blob.name.endswith('.mat'):
                 # Extract the record name from the full path
-                record_name = blob.name.split('/')[-1].split('.')[0]
+                relative_path = os.path.relpath(blob.name, f'{database_path}/WFDBRecords/')
+                record_name = relative_path[:-4]  # Remove '.mat'
                 data_entries.append(record_name)
     else:
         for root, dirs, files in os.walk(database_path):
@@ -270,7 +278,8 @@ def main():
     # Define the class mapping
     class_mapping = {
         'AFIB': ['Atrial fibrillation', 'Atrial flutter'],
-        'GSVT': ['Supraventricular tachycardia', 'Atrial tachycardia', 'Sinus node dysfunction', 'Sinus tachycardia', 'Atrioventricular nodal reentry tachycardia', 'Atrioventricular reentrant tachycardia'],
+        'GSVT': ['Supraventricular tachycardia', 'Atrial tachycardia', 'Sinus node dysfunction', 
+                 'Sinus tachycardia', 'Atrioventricular nodal reentry tachycardia', 'Atrioventricular reentrant tachycardia'],
         'SB': ['Sinus bradycardia'],
         'SR': ['Sinus rhythm', 'Sinus irregularity']
     }
@@ -286,14 +295,21 @@ def main():
         print(f"Number of data entries: {len(data_entries)}")
         print(f"First 5 data entries: {data_entries[:5]}")
         
-        dataset, label_names = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
+        dataset, classes = load_csn_data(
+            base_path, 
+            data_entries, 
+            snomed_ct_mapping, 
+            max_records=max_records, 
+            desired_length=desired_length, 
+            bucket=bucket
+        )
         
-        if dataset is None or label_names is None:
+        if dataset is None or classes is None:
             print("Error: Failed to load and preprocess ECG data. Check the logs for more details.")
             return
 
         print(f"Loaded dataset shape - X: {dataset.element_spec[0].shape}, Y_cl: {dataset.element_spec[1].shape}")
-        print(f"Unique classes: {label_names}")
+        print(f"Unique classes: {classes}")
 
         # Get the total size of the dataset
         total_size = tf.data.experimental.cardinality(dataset).numpy()
@@ -407,9 +423,9 @@ def main():
                 plt.close()
 
         # Evaluate the model on the datasets
-        evaluate_model(train_dataset, 'Training', output_dir, label_names)
-        evaluate_model(val_dataset, 'Validation', output_dir, label_names)
-        evaluate_model(test_dataset, 'Test', output_dir, label_names)
+        evaluate_model(train_dataset, 'Training', output_dir, classes)
+        evaluate_model(val_dataset, 'Validation', output_dir, classes)
+        evaluate_model(test_dataset, 'Test', output_dir, classes)
 
         # Plot training history
         plt.figure(figsize=(12, 4))
