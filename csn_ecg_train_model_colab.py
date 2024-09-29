@@ -28,16 +28,21 @@ def setup_environment(is_colab=False, bucket_name=None):
         auth.authenticate_user()
         gcs_client = storage.Client()
         
-        # Get the bucket (remove 'gs://' prefix if present)
-        bucket_name = bucket_name.replace('gs://', '')
-        bucket = gcs_client.get_bucket(bucket_name)
+        print(f"Attempting to access bucket: {bucket_name}")
+        
+        try:
+            bucket = gcs_client.get_bucket(bucket_name)
+        except Exception as e:
+            print(f"Error accessing bucket: {str(e)}")
+            raise
         
         # Create a temporary directory to mount the GCS data
         base_path = '/tmp/ecg_thesis_data'
         os.makedirs(base_path, exist_ok=True)
         
         # Download the contents of the bucket to the temporary directory
-        blobs = bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/')
+        prefix = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/'
+        blobs = bucket.list_blobs(prefix=prefix)
         for blob in blobs:
             destination_path = os.path.join(base_path, blob.name)
             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
@@ -81,7 +86,7 @@ def import_module(module_name):
 def main():
     # Setup environment and get base path
     is_colab = True  # Set this to True if you're running in Colab
-    bucket_name = 'gs://csn-ecg-dataset/'  # Your GCS bucket name
+    bucket_name = 'csn-ecg-dataset'  # Your GCS bucket name without any prefix
     base_path = setup_environment(is_colab, bucket_name)
     print(f"Base path set to: {base_path}")
 
