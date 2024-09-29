@@ -164,7 +164,7 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 5000
+    max_records = 50000  # Increased from 5000 to 50000
     desired_length = 1000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
 
@@ -183,281 +183,120 @@ def main():
         print(f"Number of SNOMED-CT codes loaded: {len(snomed_ct_mapping)}")
         
         print("Starting to load and preprocess ECG data...")
-        X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
+        dataset = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
         print("ECG data loading and preprocessing completed")
         
-        if X.size == 0 or len(Y_cl) == 0:
-            print("Error: No data was loaded. Check the data preprocessing step.")
-            print(f"X shape: {X.shape}, Y_cl length: {len(Y_cl)}")
-            return
-        
-        print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
-        unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
-        print(f"Unique classes: {unique_classes}")
-        
+        # Split the dataset into train, validation, and test sets
+        train_size = int(0.7 * max_records)
+        val_size = int(0.15 * max_records)
+        test_size = max_records - train_size - val_size
+
+        train_dataset = dataset.take(train_size).batch(32).prefetch(tf.data.AUTOTUNE)
+        val_dataset = dataset.skip(train_size).take(val_size).batch(32).prefetch(tf.data.AUTOTUNE)
+        test_dataset = dataset.skip(train_size + val_size).take(test_size).batch(32).prefetch(tf.data.AUTOTUNE)
+
+        # Get input shape and number of classes from the dataset
+        for batch in train_dataset.take(1):
+            input_shape = batch[0].shape[1:]
+            num_classes = batch[1].shape[1]
+            break
+
+        # Build the neural network model
+        if model_type == 'cnn':
+            model = build_cnn(
+                input_shape=input_shape,
+                num_classes=num_classes,
+                activation='sigmoid',  # For multi-label
+                **model_params
+            )
+        # ... (keep other model types)
+
+        # Compile the model
+        model.compile(
+            loss='binary_crossentropy',  # For multi-label
+            optimizer=keras.optimizers.Adam(learning_rate),
+            metrics=['accuracy']
+        )
+
+        # Define callbacks for training
+        callbacks = [
+            keras.callbacks.ReduceLROnPlateau(
+                monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
+            ),
+            keras.callbacks.EarlyStopping(
+                monitor='val_loss', patience=5, restore_best_weights=True, verbose=1
+            ),
+            keras.callbacks.ModelCheckpoint(
+                filepath=os.path.join(output_dir, 'best_model.keras'),
+                monitor='val_loss', save_best_only=True, verbose=1
+            )
+        ]
+
+        # Train the model using the dataset
+        history = model.fit(
+            train_dataset,
+            epochs=30,
+            validation_data=val_dataset,
+            callbacks=callbacks,
+        )
+
+        # Define evaluation function
+        def evaluate_model(dataset, name, output_dir, label_names):
+            y_pred_prob = model.predict(dataset)
+            y_true = np.concatenate([y for x, y in dataset], axis=0)
+            y_pred = (y_pred_prob >= 0.5).astype(int)
+            
+            print(f"\n{name} Performance")
+            print(classification_report(y_true, y_pred, target_names=label_names))
+            
+            # Compute confusion matrix for each class
+            conf_matrices = multilabel_confusion_matrix(y_true, y_pred)
+            
+            # Plot confusion matrix for each class
+            for i, conf_matrix in enumerate(conf_matrices):
+                plt.figure(figsize=(8, 6))
+                sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues')
+                plt.title(f'Confusion Matrix for {label_names[i]} - {name} Set')
+                plt.ylabel('True label')
+                plt.xlabel('Predicted label')
+                plt.savefig(os.path.join(output_dir, f'confusion_matrix_{name.lower()}_{label_names[i]}.png'))
+                plt.close()
+
+        # Evaluate the model on the datasets
+        evaluate_model(train_dataset, 'Training', output_dir, label_names)
+        evaluate_model(val_dataset, 'Validation', output_dir, label_names)
+        evaluate_model(test_dataset, 'Test', output_dir, label_names)
+
+        # Plot training history
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 2, 1)
+        plt.plot(history.history['loss'], label='Train Loss')
+        plt.plot(history.history['val_loss'], label='Validation Loss')
+        plt.title('Model Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.legend()
+
+        plt.subplot(1, 2, 2)
+        plt.plot(history.history['accuracy'], label='Train Accuracy')
+        plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+        plt.title('Model Accuracy')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'training_history.png'))
+        plt.close()
+
+        # ... (keep the rest of the main function)
+
     except Exception as e:
-        print(f"Error during data loading: {str(e)}")
-        logging.exception("Exception occurred during data loading")
+        print(f"Error during data loading or model training: {str(e)}")
+        logging.exception("Exception occurred during data loading or model training")
         return
 
-    # Print data summary
-    print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
-    unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
-    print(f"Unique classes: {unique_classes}")
-
-    # Analyze initial class distribution
-    initial_class_counts = Counter([item for sublist in Y_cl for item in sublist])
-    print("Initial class distribution:", dict(initial_class_counts))
-
-    # Binarize the labels for multi-label classification
-    mlb = MultiLabelBinarizer(classes=sorted(unique_classes))
-    Y_binarized = mlb.fit_transform(Y_cl)
-
-    # Update label mappings
-    label_names = mlb.classes_
-    Num2Label = {idx: label for idx, label in enumerate(label_names)}
-    label2Num = {label: idx for idx, label in enumerate(label_names)}
-    num_classes = len(label_names)
-
-    print("\nLabel to Number Mapping:")
-    for label, num in label2Num.items():
-        print(f"{label}: {num}")
-
-    print(f"\nNumber of Classes: {num_classes}")
-
-    # Print updated class distribution
-    updated_class_counts = Counter([item for sublist in Y_cl for item in sublist])
-    print("Updated class distribution:", dict(updated_class_counts))
-
-    # Print shape of X and Y_binarized
-    print(f"Shape of X: {X.shape}")
-    print(f"Shape of Y_binarized: {Y_binarized.shape}")
-
-    # Check if we have at least two samples for each class
-    samples_per_class = Y_binarized.sum(axis=0)
-    min_samples_per_class = samples_per_class.min()
-    print(f"Samples per class: {samples_per_class}")
-    print(f"Minimum samples for any class: {min_samples_per_class}")
-
-    if min_samples_per_class < 2:
-        print("Error: There are still classes with less than 2 samples.")
-        return
-
-    # Check for samples with no positive labels
-    samples_with_no_labels = (Y_binarized.sum(axis=1) == 0).sum()
-    if samples_with_no_labels > 0:
-        print(f"Warning: {samples_with_no_labels} samples have no positive labels.")
-        # Remove these samples
-        valid_samples = Y_binarized.sum(axis=1) > 0
-        X = X[valid_samples]
-        Y_binarized = Y_binarized[valid_samples]
-        print(f"Shape after removing samples with no labels - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
-
-    # Check for rare label combinations
-    label_combinations = [tuple(row) for row in Y_binarized]
-    combination_counts = Counter(label_combinations)
-    print("Label combination counts:", dict(combination_counts))
-
-    # Remove samples with unique label combinations
-    min_combination_count = 2
-    valid_combinations = [comb for comb, count in combination_counts.items() if count >= min_combination_count]
-    valid_indices = [i for i, comb in enumerate(label_combinations) if comb in valid_combinations]
-
-    X = X[valid_indices]
-    Y_binarized = Y_binarized[valid_indices]
-
-    print(f"Shape after removing rare combinations - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
-
-    # Split the data into train, validation, and test sets (before scaling)
-    test_size = 0.2
-    val_size = 0.25  # 25% of the remaining 80% = 20% of total
-
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, Y_binarized, test_size=test_size, random_state=42, stratify=Y_binarized
-        )
-
-        X_train, X_valid, y_train, y_valid = train_test_split(
-            X_train, y_train, test_size=val_size, random_state=42, stratify=y_train
-        )
-    except ValueError as e:
-        print(f"Error during train_test_split: {str(e)}")
-        print("Attempting split without stratification...")
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, Y_binarized, test_size=test_size, random_state=42
-        )
-        X_train, X_valid, y_train, y_valid = train_test_split(
-            X_train, y_train, test_size=val_size, random_state=42
-        )
-
-    # Reshape and Scale data
-    def scale_dataset(X, scaler):
-        num_samples, num_timesteps, num_channels = X.shape
-        X_reshaped = X.reshape(-1, num_channels)
-        X_scaled = scaler.transform(X_reshaped)
-        return X_scaled.reshape(num_samples, num_timesteps, num_channels)
-
-    # Fit the scaler only on training data
-    num_samples_train, num_timesteps, num_channels = X_train.shape
-    X_train_reshaped = X_train.reshape(-1, num_channels)
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_reshaped)
-    X_train_scaled = X_train_scaled.reshape(num_samples_train, num_timesteps, num_channels)
-
-    # Apply the scaler to validation and test sets
-    X_valid_scaled = scale_dataset(X_valid, scaler)
-    X_test_scaled = scale_dataset(X_test, scaler)
-
-    # Print the final shapes
-    print(f"\nTrain set shape: {X_train_scaled.shape}, {y_train.shape}")
-    print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
-    print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
-
-    # Create tf.data.Dataset objects
-    batch_size = 16  # Adjust this based on your GPU memory
-    train_dataset = create_dataset(X_train_scaled, y_train, batch_size=batch_size)
-    valid_dataset = create_dataset(X_valid_scaled, y_valid, batch_size=batch_size, shuffle=False)
-    test_dataset = create_dataset(X_test_scaled, y_test, batch_size=batch_size, shuffle=False)
-
-    # Compute class weights for imbalanced dataset
-    # For multi-label, compute class weights individually
-    class_weights = {}
-    for i, class_label in enumerate(label_names):
-        # Compute class weight based on the frequency of each class
-        class_count = y_train[:, i].sum()
-        if class_count == 0:
-            class_weights[i] = 1.0
-        else:
-            class_weights[i] = (len(y_train) / (num_classes * class_count))
-    # Alternatively, use sklearn's compute_class_weight for each class
-    # This implementation is a simplified approach
-
-    # Build the neural network model
-    if model_type == 'cnn':
-        model = build_cnn(
-            input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
-            num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
-            **model_params
-        )
-    elif model_type == 'resnet18':
-        model = build_resnet18_1d(
-            input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
-            num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
-            **model_params
-        )
-    elif model_type == 'resnet34':
-        model = build_resnet34_1d(
-            input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
-            num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
-            **model_params
-        )
-    elif model_type == 'resnet50':
-        model = build_resnet50_1d(
-            input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
-            num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
-            **model_params
-        )
-    elif model_type == 'transformer':
-        model = build_transformer(
-            input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2]),
-            num_classes=num_classes,
-            activation='sigmoid',  # For multi-label
-            **model_params
-        )
-    else:
-        raise ValueError("Invalid model type.")
-
-    # Compile the model
-    model.compile(
-        loss='binary_crossentropy',  # For multi-label
-        optimizer=keras.optimizers.Adam(learning_rate),
-        metrics=['accuracy']
-    )
-
-    # Define callbacks for training
-    callbacks = [
-        keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
-        ),
-        keras.callbacks.EarlyStopping(
-            monitor='val_loss', patience=5, restore_best_weights=True, verbose=1
-        ),
-        keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, 'best_model.keras'),
-            monitor='val_loss', save_best_only=True, verbose=1
-        )
-    ]
-
-    # Train the model using scaled data
-    history = model.fit(
-        X_train_scaled, y_train, 
-        epochs=30, 
-        validation_data=(X_valid_scaled, y_valid),
-        batch_size=256, 
-        shuffle=True, 
-        callbacks=callbacks, 
-        class_weight=class_weights
-    )
-    
-    # Define evaluation function
-    def evaluate_model(dataset, y_true, name, output_dir, label_names):
-        y_pred_prob = model.predict(dataset)
-        y_pred = (y_pred_prob >= 0.5).astype(int)
-        
-        print(f"\n{name} Performance")
-        print(classification_report(y_true, y_pred, target_names=label_names))
-        
-        # Compute confusion matrix for each class
-        conf_matrices = multilabel_confusion_matrix(y_true, y_pred)
-        
-        # Plot confusion matrix for each class
-        for i, conf_matrix in enumerate(conf_matrices):
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues')
-            plt.title(f'Confusion Matrix for {label_names[i]} - {name} Set')
-            plt.ylabel('True label')
-            plt.xlabel('Predicted label')
-            plt.savefig(os.path.join(output_dir, f'confusion_matrix_{name.lower()}_{label_names[i]}.png'))
-            plt.close()
-
-    # Evaluate the model on scaled data
-    evaluate_model(X_train_scaled, y_train, 'Training', output_dir, label_names)
-    evaluate_model(X_valid_scaled, y_valid, 'Validation', output_dir, label_names)
-    evaluate_model(X_test_scaled, y_test, 'Test', output_dir, label_names)
-
-    # Plot training history
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 2, 1)
-    plt.plot(history.history['loss'], label='Train Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
-    plt.title('Model Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-
-    plt.subplot(1, 2, 2)
-    plt.plot(history.history['accuracy'], label='Train Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
-    plt.title('Model Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'training_history.png'))
-    plt.close()
-
-    # Save model parameters to a text file
-    with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
-        f.write(f"Dataset: {dataset_name}\n")
-        f.write(f"Model Type: {model_type}\n")
-        f.write("Model Parameters:\n")
-        for key, value in model_params.items():
-            f.write(f"  {key}: {value}\n")
+    # ... (keep the rest of the main function)
 
 def print_directory_structure(startpath):
     for root, dirs, files in os.walk(startpath):

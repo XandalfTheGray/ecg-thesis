@@ -15,6 +15,8 @@ import time
 from google.cloud import storage
 import io
 from tqdm import tqdm
+import concurrent.futures
+import tensorflow as tf
 
 # Uncomment for detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -161,77 +163,24 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     logging.info(f"Starting to load data from {len(data_entries)} records")
     
-    # Use tqdm to create a progress bar
-    for i, record in enumerate(tqdm(data_entries[:max_records], desc="Loading records", unit="record")):
-        if i % 100 == 0:
-            logging.info(f"Processed {i} records so far. Current X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
+    # Function to process a single record
+    def process_record(record):
+        # ... (keep the existing code for processing a single record)
+        return ecg_padded, valid_classes
+
+    # Use ThreadPoolExecutor for parallel processing
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        future_to_record = {executor.submit(process_record, record): record for record in data_entries[:max_records]}
         
-        logging.info(f"Processing record: {record}")
-        if bucket:
-            # Construct the full path for .mat and .hea files
-            record_path = f'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/{record}'
-            mat_blob = bucket.blob(f'{record_path}.mat')
-            hea_blob = bucket.blob(f'{record_path}.hea')
-            
-            if not (mat_blob.exists() and hea_blob.exists()):
-                logging.warning(f"Files not found for record {record}")
-                continue
-
+        for future in tqdm(concurrent.futures.as_completed(future_to_record), total=len(future_to_record), desc="Loading records"):
+            record = future_to_record[future]
             try:
-                # Read .mat file
-                mat_content = mat_blob.download_as_bytes()
-                mat_file = io.BytesIO(mat_content)
-                mat_data = loadmat(mat_file)
-                
-                if 'val' not in mat_data:
-                    logging.warning(f"'val' key not found in mat file for record {record}")
-                    continue
-                ecg_data = mat_data['val']
-
-                # Read .hea file
-                hea_content = hea_blob.download_as_text()
-                record_header = wfdb.io.header.parse_header(io.StringIO(hea_content))
-            except Exception as e:
-                logging.error(f"Error reading files for record {record}: {str(e)}")
-                continue
-        else:
-            mat_file = os.path.join(base_path, f'{record}.mat')
-            hea_file = os.path.join(base_path, f'{record}.hea')
-
-            if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-                logging.warning(f"Files not found for record {record}")
-                continue
-
-            try:
-                mat_data = loadmat(mat_file)
-                if 'val' not in mat_data:
-                    logging.warning(f"'val' key not found in mat file for record {record}")
-                    continue
-                ecg_data = mat_data['val']
-
-                record_header = wfdb.rdheader(os.path.join(base_path, record))
-            except Exception as e:
-                logging.error(f"Error reading files for record {record}: {str(e)}")
-                continue
-
-        snomed_ct_codes = extract_snomed_ct_codes(record_header)
-
-        if not snomed_ct_codes:
-            logging.warning(f"No SNOMED-CT codes found for record {record}")
-            continue
-
-        valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
-        if len(valid_classes) > 1 and 'Other' in valid_classes:
-            valid_classes.remove('Other')
-
-        if not valid_classes:
-            logging.warning(f"No valid classes found for record {record}")
-            continue
-
-        ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
-
-        X.append(ecg_padded)
-        Y_cl.append(valid_classes)
+                ecg_padded, valid_classes = future.result()
+                if ecg_padded is not None and valid_classes:
+                    X.append(ecg_padded)
+                    Y_cl.append(valid_classes)
+            except Exception as exc:
+                logging.error(f'{record} generated an exception: {exc}')
 
     logging.info(f"Loaded {len(X)} records successfully")
     
@@ -240,7 +189,15 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     else:
         logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
 
-    return np.array(X), Y_cl
+    # Convert to TensorFlow Dataset
+    X = np.array(X)
+    Y = np.array(Y_cl)
+    dataset = tf.data.Dataset.from_tensor_slices((X, Y))
+    
+    # Use prefetch and cache to optimize memory usage
+    dataset = dataset.cache().prefetch(tf.data.AUTOTUNE)
+
+    return dataset
 
 def find_mat_files(directory):
     """
@@ -317,7 +274,7 @@ def main():
     data_entries = [os.path.relpath(file, database_path)[:-4] for file in mat_files]
     logging.info(f"Prepared {len(data_entries)} data entries for processing")
 
-    X, Y_cl = load_csn_data(
+    dataset = load_csn_data(
         base_path, 
         data_entries, 
         snomed_ct_mapping, 
@@ -326,14 +283,14 @@ def main():
         bucket=None
     )
 
-    print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
-    unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
+    print(f"Loaded dataset shape - X: {dataset.element_spec[0].shape}, Y_cl: {len(dataset)}")
+    unique_classes = set(class_name for sublist in dataset.element_spec[1].numpy() for class_name in sublist)
     print(f"Unique classes: {unique_classes}")
 
-    if len(X) > 0:
+    if len(dataset) > 0:
         plt.figure(figsize=(15, 5))
-        for lead in range(X[0].shape[1]):
-            plt.plot(X[0][:, lead], label=f'Lead {lead+1}')
+        for lead in range(dataset.element_spec[0].shape[1]):
+            plt.plot(dataset.element_spec[0][:, lead], label=f'Lead {lead+1}')
         plt.title(f'Sample ECG Signal')
         plt.xlabel('Time Steps')
         plt.ylabel('Amplitude')
