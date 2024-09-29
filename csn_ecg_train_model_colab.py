@@ -1,4 +1,4 @@
-# File: csn_ecg_train_model.py
+# File: csn_ecg_train_model_colab.py
 # This script trains a neural network model on the preprocessed CSN ECG dataset
 
 import os

@@ -1,5 +1,5 @@
-# csn_ecg_data_preprocessing.py
-# This script preprocesses the CSN ECG dataset, extracting SNOMED-CT codes and ECG data
+# csn_ecg_data_preprocessing_colab.py
+# This script preprocesses the CSN ECG dataset for colab, extracting SNOMED-CT codes and ECG data
 
 import numpy as np
 import os
