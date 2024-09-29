@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import tensorflow as tf
 import importlib
+import logging
 
 def download_blob(blob, base_path):
     destination_path = os.path.join(base_path, blob.name)
@@ -84,6 +85,9 @@ def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
     return dataset
 
 def main():
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
     # Setup environment and get base path
     is_colab = True  # Set this to True if you're running in Colab
     bucket_name = 'csn-ecg-dataset'  # Your GCS bucket name
@@ -153,13 +157,6 @@ def main():
                                  for file in files if file.endswith('.mat')])
 
     print(f"Total records found for CSN ECG: {len(data_entries)}")
-    print(f"Processing up to {max_records} records for CSN ECG dataset")
-    print("Loading SNOMED-CT mapping...")
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
-    print("SNOMED-CT mapping loaded successfully")
-    print("Starting to load and preprocess ECG data...")
-    X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
-    print("ECG data loading and preprocessing completed")
     
     if len(data_entries) == 0:
         print("Error: No records found. Check the database path and file structure.")
@@ -179,10 +176,15 @@ def main():
     }
 
     try:
+        print("Loading SNOMED-CT mapping...")
         snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
+        print("SNOMED-CT mapping loaded successfully")
+        print("Starting to load and preprocess ECG data...")
         X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
+        print("ECG data loading and preprocessing completed")
     except Exception as e:
         print(f"Error during data loading: {str(e)}")
+        logging.exception("Exception occurred during data loading")
         return
 
     if X.size == 0 or len(Y_cl) == 0:
