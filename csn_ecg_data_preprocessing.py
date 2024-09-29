@@ -8,10 +8,9 @@ from scipy.io import loadmat
 import wfdb
 import logging
 import pandas as pd
-import matplotlib.pyplot as plt  # Import matplotlib for plotting
+import matplotlib.pyplot as plt
 from google.colab import drive
 
-# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_snomed_ct_mapping(csv_path, class_mapping):
@@ -83,8 +82,6 @@ def plot_ecg_signal(ecg_signal, record_name, plot_dir, class_names):
     simplified_name = record_name.replace('\\', '_').replace('/', '_')
     plt.savefig(os.path.join(plot_dir, f'{simplified_name}.png'))
     plt.close()
-
-# ... [rest of your script remains unchanged]
 
 def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots_per_class=1, plot_dir='csnecg_output_plots/class_ecg_plots/'):
     """
