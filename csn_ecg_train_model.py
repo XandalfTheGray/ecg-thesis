@@ -359,6 +359,7 @@ def plot_training_history(history, output_dir):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a neural network model on the preprocessed CSN ECG dataset.')
-    parser.add_argument('--time_steps', type=int, required=True, help='Number of time steps in the preprocessed data.')
+    parser.add_argument('--time_steps', type=int, choices=[500, 1000, 2000, 5000], required=True, 
+                        help='Number of time steps in the preprocessed data.')
     args = parser.parse_args()
     main(args.time_steps)
