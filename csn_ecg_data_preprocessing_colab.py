@@ -171,10 +171,16 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
         mat_file = f'{base_path}/{record_path}.mat'
         hea_file = f'{base_path}/{record_path}.hea'
 
+        print(f"Attempting to access: {mat_file}")  # Add this line
+
         try:
             # Download files from GCS
             mat_blob = bucket.blob(mat_file.replace(f'{base_path}/', ''))
             hea_blob = bucket.blob(hea_file.replace(f'{base_path}/', ''))
+
+            print(f"Mat blob: {mat_blob.name}")  # Add this line
+            print(f"Hea blob: {hea_blob.name}")  # Add this line
+
             mat_content = mat_blob.download_as_bytes()
             hea_content = hea_blob.download_as_string().decode('utf-8')
 

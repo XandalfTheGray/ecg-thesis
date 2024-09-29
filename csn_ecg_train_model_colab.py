@@ -176,6 +176,12 @@ def main():
     base_path, bucket = setup_environment(is_colab, bucket_name)
     print(f"Base path set to: {base_path}")
 
+    # Add this after setting up the bucket
+    print("Listing contents of the bucket:")
+    blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/'))
+    for blob in blobs[:20]:  # Print first 20 items
+        print(blob.name)
+
     # Import required modules
     models = import_module('models')
     evaluation = import_module('evaluation')
