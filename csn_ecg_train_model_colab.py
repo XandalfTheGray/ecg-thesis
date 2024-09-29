@@ -283,11 +283,13 @@ def main():
         
         print("Starting to load and preprocess ECG data...")
         dataset, label_names = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
-        print("ECG data loading and preprocessing completed")
         
-        if dataset is None:
-            print("Error: No data was loaded. Exiting.")
+        if dataset is None or label_names is None:
+            print("Error: Failed to load and preprocess ECG data. Check the logs for more details.")
             return
+
+        print(f"Loaded dataset shape - X: {dataset.element_spec[0].shape}, Y_cl: {dataset.element_spec[1].shape}")
+        print(f"Unique classes: {label_names}")
 
         # Get the total size of the dataset
         total_size = tf.data.experimental.cardinality(dataset).numpy()

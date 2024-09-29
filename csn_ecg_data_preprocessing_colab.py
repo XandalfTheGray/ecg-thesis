@@ -171,15 +171,20 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
         mat_file = f'{record_path}.mat'
         hea_file = f'{record_path}.hea'
 
-        print(f"Attempting to access: {mat_file}")  # Add this line
+        print(f"Attempting to access: {mat_file}")  # Debug print
 
         try:
             # Download files from GCS
             mat_blob = bucket.blob(mat_file)
             hea_blob = bucket.blob(hea_file)
 
-            print(f"Mat blob: {mat_blob.name}")  # Add this line
-            print(f"Hea blob: {hea_blob.name}")  # Add this line
+            print(f"Mat blob: {mat_blob.name}")  # Debug print
+            print(f"Hea blob: {hea_blob.name}")  # Debug print
+
+            if not mat_blob.exists():
+                raise FileNotFoundError(f"Mat file not found: {mat_file}")
+            if not hea_blob.exists():
+                raise FileNotFoundError(f"Hea file not found: {hea_file}")
 
             mat_content = mat_blob.download_as_bytes()
             hea_content = hea_blob.download_as_string().decode('utf-8')
@@ -220,7 +225,7 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     if len(X) == 0:
         logging.error("No records were successfully loaded. Check the data files and paths.")
-        return None
+        return None, None  # Return None, None instead of just None
 
     logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
     
