@@ -19,6 +19,7 @@ from google.cloud import storage
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import tensorflow as tf
+import importlib
 
 def download_blob(blob, base_path):
     destination_path = os.path.join(base_path, blob.name)
@@ -70,9 +71,8 @@ def import_module(module_name):
     try:
         return importlib.import_module(module_name)
     except ImportError:
-        print(f"Error importing {module_name}. Attempting to install...")
-        !pip install {module_name}
-        return importlib.import_module(module_name)
+        print(f"Error importing {module_name}. Please make sure it's installed.")
+        return None
 
 def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
     dataset = tf.data.Dataset.from_tensor_slices((X, y))
@@ -103,7 +103,7 @@ def main():
     build_transformer = models.build_transformer
     print_stats = evaluation.print_stats
     showConfusionMatrix = evaluation.showConfusionMatrix
-    load_csn_data = csn_ecg_data_preprocessing_colab.load_data
+    load_csn_data = csn_ecg_data_preprocessing_colab.load_csn_data
     load_snomed_ct_mapping = csn_ecg_data_preprocessing_colab.load_snomed_ct_mapping
 
     # Setup parameters
@@ -171,7 +171,8 @@ def main():
         'SR': ['Sinus rhythm', 'Sinus irregularity']
     }
 
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket)
+    # Update this line to pass the bucket parameter
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
     X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=5000, bucket=bucket)
 
     if X.size == 0 or len(Y_cl) == 0:
