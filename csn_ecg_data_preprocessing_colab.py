@@ -168,15 +168,15 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     def process_record(record):
         # Construct the correct path for .mat and .hea files
         record_path = f'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/{record[:2]}/{record[:3]}/{record}'
-        mat_file = f'{base_path}/{record_path}.mat'
-        hea_file = f'{base_path}/{record_path}.hea'
+        mat_file = f'{record_path}.mat'
+        hea_file = f'{record_path}.hea'
 
         print(f"Attempting to access: {mat_file}")  # Add this line
 
         try:
             # Download files from GCS
-            mat_blob = bucket.blob(mat_file.replace(f'{base_path}/', ''))
-            hea_blob = bucket.blob(hea_file.replace(f'{base_path}/', ''))
+            mat_blob = bucket.blob(mat_file)
+            hea_blob = bucket.blob(hea_file)
 
             print(f"Mat blob: {mat_blob.name}")  # Add this line
             print(f"Hea blob: {hea_blob.name}")  # Add this line

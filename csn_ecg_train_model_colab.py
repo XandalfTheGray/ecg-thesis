@@ -178,7 +178,7 @@ def main():
 
     # Add this after setting up the bucket
     print("Listing contents of the bucket:")
-    blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/'))
+    blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/'))
     for blob in blobs[:20]:  # Print first 20 items
         print(blob.name)
 
@@ -263,7 +263,7 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 500  
+    max_records = 10  
     desired_length = 500
     print(f"Processing up to {max_records} records for CSN ECG dataset")
 
