@@ -14,13 +14,36 @@ from sklearn.metrics import multilabel_confusion_matrix, classification_report
 import seaborn as sns
 import sys
 import importlib.util
+from google.colab import auth
+from google.cloud import storage
 
-def setup_environment(is_colab=False):
+def setup_environment(is_colab=False, bucket_name=None):
     if is_colab:
-        from google.colab import drive
-        drive.mount('/content/drive', force_remount=True)
-        base_path = '/content/drive/MyDrive/ecg_thesis_data/'
+        if bucket_name is None:
+            raise ValueError("bucket_name must be provided when using Google Colab with GCS")
+        
         print('GOOGLE COLAB ENVIRONMENT DETECTED')
+        
+        # Authenticate and create a GCS client
+        auth.authenticate_user()
+        gcs_client = storage.Client()
+        
+        # Get the bucket (remove 'gs://' prefix if present)
+        bucket_name = bucket_name.replace('gs://', '')
+        bucket = gcs_client.get_bucket(bucket_name)
+        
+        # Create a temporary directory to mount the GCS data
+        base_path = '/tmp/ecg_thesis_data'
+        os.makedirs(base_path, exist_ok=True)
+        
+        # Download the contents of the bucket to the temporary directory
+        blobs = bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/')
+        for blob in blobs:
+            destination_path = os.path.join(base_path, blob.name)
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            blob.download_to_filename(destination_path)
+        
+        print(f'Data downloaded from GCS bucket: {bucket_name}')
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
         print('LOCAL ENVIRONMENT DETECTED')
@@ -57,14 +80,15 @@ def import_module(module_name):
 
 def main():
     # Setup environment and get base path
-    is_colab = False  # Set this to True if you're running in Colab
-    base_path = setup_environment(is_colab)
+    is_colab = True  # Set this to True if you're running in Colab
+    bucket_name = 'gs://csn-ecg-dataset/'  # Your GCS bucket name
+    base_path = setup_environment(is_colab, bucket_name)
     print(f"Base path set to: {base_path}")
 
     # Import required modules
     models = import_module('models')
     evaluation = import_module('evaluation')
-    csn_ecg_data_preprocessing = import_module('csn_ecg_data_preprocessing')
+    csn_ecg_data_preprocessing_colab = import_module('csn_ecg_data_preprocessing_colab')
 
     # Now you can use the imported modules
     build_cnn = models.build_cnn
@@ -74,8 +98,8 @@ def main():
     build_transformer = models.build_transformer
     print_stats = evaluation.print_stats
     showConfusionMatrix = evaluation.showConfusionMatrix
-    load_csn_data = csn_ecg_data_preprocessing.load_data
-    load_snomed_ct_mapping = csn_ecg_data_preprocessing.load_snomed_ct_mapping
+    load_csn_data = csn_ecg_data_preprocessing_colab.load_data
+    load_snomed_ct_mapping = csn_ecg_data_preprocessing_colab.load_snomed_ct_mapping
 
     # Setup parameters
     base_output_dir = os.path.join(base_path, 'output_plots')
@@ -112,8 +136,7 @@ def main():
 
 
     # Set up paths for the CSN ECG dataset
-    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
-                                 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
+    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
     wfdb_dir = os.path.join(database_path, 'WFDBRecords')
     
     if not os.path.exists(wfdb_dir):
