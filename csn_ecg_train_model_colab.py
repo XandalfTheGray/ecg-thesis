@@ -22,6 +22,8 @@ import tensorflow as tf
 import importlib
 import logging
 import concurrent.futures
+from scipy.io import loadmat
+import io
 
 def download_blob(blob, base_path):
     destination_path = os.path.join(base_path, blob.name)
@@ -94,8 +96,33 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     # Function to process a single record
     def process_record(record):
-        # ... (keep the existing code for processing a single record)
-        return ecg_padded, valid_classes
+        mat_file = f'{base_path}/WFDBRecords/{record}.mat'
+        hea_file = f'{base_path}/WFDBRecords/{record}.hea'
+
+        try:
+            # Download files from GCS
+            mat_blob = bucket.blob(mat_file)
+            hea_blob = bucket.blob(hea_file)
+            mat_content = mat_blob.download_as_bytes()
+            hea_content = hea_blob.download_as_string().decode('utf-8')
+
+            # Load mat file
+            mat_data = loadmat(io.BytesIO(mat_content))
+            ecg_data = mat_data['val']
+
+            # Process header file
+            snomed_ct_codes = extract_snomed_ct_codes(hea_content)
+            valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
+            if len(valid_classes) > 1 and 'Other' in valid_classes:
+                valid_classes.remove('Other')
+
+            # Pad or truncate ECG data
+            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
+
+            return ecg_padded, valid_classes
+        except Exception as e:
+            logging.error(f"Error processing record {record}: {str(e)}")
+            return None, None
 
     # Use ThreadPoolExecutor for parallel processing
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
@@ -115,7 +142,7 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     if len(X) == 0:
         logging.error("No records were successfully loaded. Check the data files and paths.")
-        return None
+        return None, None
 
     logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
     
@@ -274,7 +301,32 @@ def main():
                 activation='sigmoid',  # For multi-label
                 **model_params
             )
-        # ... (keep other model types)
+        elif model_type == 'resnet18':
+            model = build_resnet18_1d(
+                input_shape=input_shape,
+                num_classes=num_classes,
+                **model_params
+            )
+        elif model_type == 'resnet34':
+            model = build_resnet34_1d(
+                input_shape=input_shape,
+                num_classes=num_classes,
+                **model_params
+            )
+        elif model_type == 'resnet50':
+            model = build_resnet50_1d(
+                input_shape=input_shape,
+                num_classes=num_classes,
+                **model_params
+            )
+        elif model_type == 'transformer':
+            model = build_transformer(
+                input_shape=input_shape,
+                num_classes=num_classes,
+                **model_params
+            )
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
 
         # Compile the model
         model.compile(
@@ -354,14 +406,16 @@ def main():
         plt.savefig(os.path.join(output_dir, 'training_history.png'))
         plt.close()
 
-        # ... (keep the rest of the main function)
+        print("Model training and evaluation completed successfully.")
 
     except Exception as e:
         print(f"Error during data loading or model training: {str(e)}")
         logging.exception("Exception occurred during data loading or model training")
-        return
+    
+    print("Main function execution completed.")
 
-    # ... (keep the rest of the main function)
+if __name__ == '__main__':
+    main()
 
 def print_directory_structure(startpath):
     for root, dirs, files in os.walk(startpath):
@@ -371,6 +425,3 @@ def print_directory_structure(startpath):
         subindent = ' ' * 4 * (level + 1)
         for f in files:
             print(f"{subindent}{f}")
-
-if __name__ == '__main__':
-    main()
