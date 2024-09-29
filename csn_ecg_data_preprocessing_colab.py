@@ -17,6 +17,7 @@ import io
 from tqdm import tqdm
 import concurrent.futures
 import tensorflow as tf
+from sklearn.preprocessing import MultiLabelBinarizer
 
 # Uncomment for detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -165,8 +166,33 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     # Function to process a single record
     def process_record(record):
-        # ... (keep the existing code for processing a single record)
-        return ecg_padded, valid_classes
+        mat_file = f'{base_path}/WFDBRecords/{record}.mat'
+        hea_file = f'{base_path}/WFDBRecords/{record}.hea'
+
+        try:
+            # Download files from GCS
+            mat_blob = bucket.blob(mat_file)
+            hea_blob = bucket.blob(hea_file)
+            mat_content = mat_blob.download_as_bytes()
+            hea_content = hea_blob.download_as_string().decode('utf-8')
+
+            # Load mat file
+            mat_data = loadmat(io.BytesIO(mat_content))
+            ecg_data = mat_data['val']
+
+            # Process header file
+            snomed_ct_codes = extract_snomed_ct_codes(hea_content)
+            valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
+            if len(valid_classes) > 1 and 'Other' in valid_classes:
+                valid_classes.remove('Other')
+
+            # Pad or truncate ECG data
+            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
+
+            return ecg_padded, valid_classes
+        except Exception as e:
+            logging.error(f"Error processing record {record}: {str(e)}")
+            return None, None
 
     # Use ThreadPoolExecutor for parallel processing
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
@@ -186,18 +212,25 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     if len(X) == 0:
         logging.error("No records were successfully loaded. Check the data files and paths.")
-    else:
-        logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
+        return None
 
-    # Convert to TensorFlow Dataset
+    logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
+    
+    # Convert to numpy arrays
     X = np.array(X)
     Y = np.array(Y_cl)
-    dataset = tf.data.Dataset.from_tensor_slices((X, Y))
+
+    # Create a MultiLabelBinarizer to convert Y_cl to one-hot encoded format
+    mlb = MultiLabelBinarizer()
+    Y_encoded = mlb.fit_transform(Y)
+
+    # Convert to TensorFlow Dataset
+    dataset = tf.data.Dataset.from_tensor_slices((X, Y_encoded))
     
-    # Use prefetch and cache to optimize memory usage
+    # Use cache and prefetch to optimize memory usage
     dataset = dataset.cache().prefetch(tf.data.AUTOTUNE)
 
-    return dataset
+    return dataset, mlb.classes_
 
 def find_mat_files(directory):
     """
@@ -274,7 +307,7 @@ def main():
     data_entries = [os.path.relpath(file, database_path)[:-4] for file in mat_files]
     logging.info(f"Prepared {len(data_entries)} data entries for processing")
 
-    dataset = load_csn_data(
+    dataset, classes = load_csn_data(
         base_path, 
         data_entries, 
         snomed_ct_mapping, 
@@ -283,9 +316,8 @@ def main():
         bucket=None
     )
 
-    print(f"Loaded dataset shape - X: {dataset.element_spec[0].shape}, Y_cl: {len(dataset)}")
-    unique_classes = set(class_name for sublist in dataset.element_spec[1].numpy() for class_name in sublist)
-    print(f"Unique classes: {unique_classes}")
+    print(f"Loaded dataset shape - X: {dataset.element_spec[0].shape}, Y_cl: {dataset.element_spec[1].shape}")
+    print(f"Unique classes: {classes}")
 
     if len(dataset) > 0:
         plt.figure(figsize=(15, 5))
