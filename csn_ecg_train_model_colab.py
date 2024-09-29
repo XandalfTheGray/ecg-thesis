@@ -153,6 +153,13 @@ def main():
                                  for file in files if file.endswith('.mat')])
 
     print(f"Total records found for CSN ECG: {len(data_entries)}")
+    print(f"Processing up to {max_records} records for CSN ECG dataset")
+    print("Loading SNOMED-CT mapping...")
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
+    print("SNOMED-CT mapping loaded successfully")
+    print("Starting to load and preprocess ECG data...")
+    X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
+    print("ECG data loading and preprocessing completed")
     
     if len(data_entries) == 0:
         print("Error: No records found. Check the database path and file structure.")

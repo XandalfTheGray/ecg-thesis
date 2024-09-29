@@ -14,6 +14,7 @@ from functools import partial
 import time
 from google.cloud import storage
 import io
+from tqdm import tqdm
 
 # Uncomment for detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -160,16 +161,13 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     logging.info(f"Starting to load data from {len(data_entries)} records")
     
-    for i, record in enumerate(data_entries[:max_records]):
-        if i % 100 == 0:
-            logging.info(f"Processing record {i}/{min(len(data_entries), max_records or len(data_entries))}")
-        
+    # Use tqdm to create a progress bar
+    for record in tqdm(data_entries[:max_records], desc="Loading records", unit="record"):
         if bucket:
             mat_blob = bucket.blob(f'{record}.mat')
             hea_blob = bucket.blob(f'{record}.hea')
             
             if not (mat_blob.exists() and hea_blob.exists()):
-                logging.warning(f"Files not found for record {record}")
                 continue
 
             try:
@@ -179,7 +177,6 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
                 mat_data = loadmat(mat_file)
                 
                 if 'val' not in mat_data:
-                    logging.warning(f"'val' key not found in mat file for record {record}")
                     continue
                 ecg_data = mat_data['val']
 
@@ -194,13 +191,11 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
             hea_file = os.path.join(base_path, f'{record}.hea')
 
             if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-                logging.warning(f"Files not found for record {record}")
                 continue
 
             try:
                 mat_data = loadmat(mat_file)
                 if 'val' not in mat_data:
-                    logging.warning(f"'val' key not found in mat file for record {record}")
                     continue
                 ecg_data = mat_data['val']
 
@@ -212,7 +207,6 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
         snomed_ct_codes = extract_snomed_ct_codes(record_header)
 
         if not snomed_ct_codes:
-            logging.warning(f"No SNOMED-CT codes found for record {record}")
             continue
 
         valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
