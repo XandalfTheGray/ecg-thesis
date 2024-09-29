@@ -157,44 +157,62 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     X, Y_cl = [], []
     client = storage.Client()
     bucket = client.get_bucket(base_path.replace('gs://', ''))
-
-    for record in data_entries[:max_records]:
+    
+    logging.info(f"Starting to load data from {len(data_entries)} records")
+    
+    for i, record in enumerate(data_entries[:max_records]):
+        if i % 100 == 0:
+            logging.info(f"Processing record {i}/{min(len(data_entries), max_records or len(data_entries))}")
+        
         if bucket:
             mat_blob = bucket.blob(f'{record}.mat')
             hea_blob = bucket.blob(f'{record}.hea')
             
             if not (mat_blob.exists() and hea_blob.exists()):
+                logging.warning(f"Files not found for record {record}")
                 continue
 
-            # Read .mat file
-            mat_content = mat_blob.download_as_bytes()
-            mat_file = io.BytesIO(mat_content)
-            mat_data = loadmat(mat_file)
-            
-            if 'val' not in mat_data:
-                continue
-            ecg_data = mat_data['val']
+            try:
+                # Read .mat file
+                mat_content = mat_blob.download_as_bytes()
+                mat_file = io.BytesIO(mat_content)
+                mat_data = loadmat(mat_file)
+                
+                if 'val' not in mat_data:
+                    logging.warning(f"'val' key not found in mat file for record {record}")
+                    continue
+                ecg_data = mat_data['val']
 
-            # Read .hea file
-            hea_content = hea_blob.download_as_text()
-            record_header = wfdb.io.header.parse_header(io.StringIO(hea_content))
+                # Read .hea file
+                hea_content = hea_blob.download_as_text()
+                record_header = wfdb.io.header.parse_header(io.StringIO(hea_content))
+            except Exception as e:
+                logging.error(f"Error reading files for record {record}: {str(e)}")
+                continue
         else:
             mat_file = os.path.join(base_path, f'{record}.mat')
             hea_file = os.path.join(base_path, f'{record}.hea')
 
             if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+                logging.warning(f"Files not found for record {record}")
                 continue
 
-            mat_data = loadmat(mat_file)
-            if 'val' not in mat_data:
-                continue
-            ecg_data = mat_data['val']
+            try:
+                mat_data = loadmat(mat_file)
+                if 'val' not in mat_data:
+                    logging.warning(f"'val' key not found in mat file for record {record}")
+                    continue
+                ecg_data = mat_data['val']
 
-            record_header = wfdb.rdheader(os.path.join(base_path, record))
+                record_header = wfdb.rdheader(os.path.join(base_path, record))
+            except Exception as e:
+                logging.error(f"Error reading files for record {record}: {str(e)}")
+                continue
 
         snomed_ct_codes = extract_snomed_ct_codes(record_header)
 
         if not snomed_ct_codes:
+            logging.warning(f"No SNOMED-CT codes found for record {record}")
             continue
 
         valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
@@ -206,6 +224,7 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
         X.append(ecg_padded)
         Y_cl.append(valid_classes)
 
+    logging.info(f"Loaded {len(X)} records successfully")
     return np.array(X), Y_cl
 
 def find_mat_files(directory):

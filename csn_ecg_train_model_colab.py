@@ -140,6 +140,7 @@ def main():
 
     # Set up paths for the CSN ECG dataset
     database_path = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0'
+    csv_path = f'{database_path}/ConditionNames_SNOMED-CT.csv'
     
     # Gather all record names
     data_entries = []
@@ -161,7 +162,6 @@ def main():
     max_records = 5000
     desired_length = 1000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
-    csv_path = f'{database_path}/ConditionNames_SNOMED-CT.csv'
 
     # Define the class mapping
     class_mapping = {
@@ -171,9 +171,12 @@ def main():
         'SR': ['Sinus rhythm', 'Sinus irregularity']
     }
 
-    # Update this line to pass the bucket parameter
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
-    X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=5000, bucket=bucket)
+    try:
+        snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket=bucket)
+        X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
+    except Exception as e:
+        print(f"Error during data loading: {str(e)}")
+        return
 
     if X.size == 0 or len(Y_cl) == 0:
         print("Error: No data was loaded. Check the data preprocessing step.")
