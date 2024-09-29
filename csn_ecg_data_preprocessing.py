@@ -9,6 +9,7 @@ import wfdb
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt  # Import matplotlib for plotting
+from google.colab import drive
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -85,7 +86,7 @@ def plot_ecg_signal(ecg_signal, record_name, plot_dir, class_names):
 
 # ... [rest of your script remains unchanged]
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots_per_class=1, plot_dir='output_plots/class_ecg_plots/'):
+def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots_per_class=1, plot_dir='csnecg_output_plots/class_ecg_plots/'):
     """
     Load and preprocess ECG data from the CSN dataset and save to disk.
     """
@@ -199,20 +200,28 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
     Y_cl = np.array(Y_cl, dtype=object)
     
     # Save preprocessed data to disk
-    os.makedirs('preprocessed_data', exist_ok=True)  # Ensure the directory exists
-    np.save('preprocessed_data/X.npy', X)
-    np.save('preprocessed_data/Y.npy', Y_cl)
-    logging.info("Saved preprocessed data to 'preprocessed_data/' directory")
+    base_path = '/content/drive/MyDrive'
+    preprocessed_data_dir = os.path.join(base_path, 'csnecg_preprocessed_data')
+    os.makedirs(preprocessed_data_dir, exist_ok=True)  # Ensure the directory exists
+    np.save(os.path.join(preprocessed_data_dir, 'X.npy'), X)
+    np.save(os.path.join(preprocessed_data_dir, 'Y.npy'), Y_cl)
+    logging.info(f"Saved preprocessed data to '{preprocessed_data_dir}' directory")
 
 def main():
     """
     Main function to preprocess the CSN ECG dataset and save processed data to disk.
     """
+    # Mount Google Drive
+    drive.mount('/content/drive')
+
+    # Set base path to the mounted Google Drive
+    base_path = '/content/drive/MyDrive'
+
     # Paths
-    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                  'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                                  'WFDBRecords')
-    csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    csv_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                             'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                             'ConditionNames_SNOMED-CT.csv')
 
@@ -246,7 +255,7 @@ def main():
         max_records=45152,  # Set to desired number of records
         desired_length=500, 
         num_plots_per_class=1,
-        plot_dir='output_plots/class_ecg_plots/'
+        plot_dir=os.path.join(base_path, 'csnecg_output_plots/class_ecg_plots/')
     )
 
 if __name__ == '__main__':
