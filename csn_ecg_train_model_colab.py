@@ -18,6 +18,7 @@ from google.colab import auth, drive
 from google.cloud import storage
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import tensorflow as tf
 
 def download_blob(blob, base_path):
     destination_path = os.path.join(base_path, blob.name)
@@ -34,63 +35,59 @@ def setup_environment(is_colab=False, bucket_name=None):
         # Authenticate
         auth.authenticate_user()
         
-        # Mount Google Drive
-        drive.mount('/content/drive')
+        # Create a client
+        client = storage.Client()
         
-        # Set up the path to the mounted GCS bucket
-        base_path = f'/content/drive/MyDrive/gcs/{bucket_name}'
+        # Get the bucket
+        bucket = client.get_bucket(bucket_name)
         
-        # Check if the bucket is already mounted
-        if not os.path.exists(base_path):
-            print(f"Mounting GCS bucket: {bucket_name}")
-            
-            # Create the directory for mounting
-            os.makedirs(base_path, exist_ok=True)
-            
-            # Use gcsfuse to mount the bucket (you may need to install gcsfuse)
-            !gcsfuse --implicit-dirs {bucket_name} {base_path}
+        print(f"Accessing GCS bucket: {bucket_name}")
+        
+        # List files in the bucket to verify access
+        blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/', max_results=10))
+        
+        if not blobs:
+            print(f"WARNING: No files found in the specified path in the GCS bucket.")
         else:
-            print(f"GCS bucket already mounted at: {base_path}")
+            print(f"Successfully accessed the GCS bucket. Found files in the specified path.")
         
-        print(f'Base Path (Mounted GCS bucket): {base_path}')
+        base_path = f'gs://{bucket_name}'
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
         print('LOCAL ENVIRONMENT DETECTED')
-        print(f'Base Path: {base_path}')
+        bucket = None
     
-    # Add the current directory to the Python path
-    if base_path not in sys.path:
-        sys.path.append(base_path)
+    print(f'Base Path: {base_path}')
     
     # Additional environment checks
     print(f"Python version: {sys.version}")
     print(f"Current working directory: {os.getcwd()}")
-    print(f"Contents of base directory: {os.listdir(base_path)}")
     print(f"Python path: {sys.path}")
     
-    # Check for dataset existence
-    dataset_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
-    if not os.path.exists(dataset_path):
-        print(f"WARNING: Dataset not found at {dataset_path}")
-        print("Please ensure the CSN ECG dataset is in the correct directory in the GCS bucket.")
-        print("Expected path:", dataset_path)
-    else:
-        print(f"Dataset found at: {dataset_path}")
-    
-    return base_path
+    return base_path, bucket
 
 def import_module(module_name):
     try:
         return importlib.import_module(module_name)
     except ImportError:
-        print(f"Error importing {module_name}. Make sure the file is in the correct directory.")
-        sys.exit(1)
+        print(f"Error importing {module_name}. Attempting to install...")
+        !pip install {module_name}
+        return importlib.import_module(module_name)
+
+def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
+    dataset = tf.data.Dataset.from_tensor_slices((X, y))
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=len(X))
+    dataset = dataset.batch(batch_size)
+    if prefetch:
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
 
 def main():
     # Setup environment and get base path
     is_colab = True  # Set this to True if you're running in Colab
     bucket_name = 'csn-ecg-dataset'  # Your GCS bucket name
-    base_path = setup_environment(is_colab, bucket_name)
+    base_path, bucket = setup_environment(is_colab, bucket_name)
     print(f"Base path set to: {base_path}")
 
     # Import required modules
@@ -110,7 +107,7 @@ def main():
     load_snomed_ct_mapping = csn_ecg_data_preprocessing_colab.load_snomed_ct_mapping
 
     # Setup parameters
-    base_output_dir = os.path.join(base_path, 'output_plots')
+    base_output_dir = os.path.join('output_plots')
     dataset_name = 'csn_ecg'
     model_type = 'cnn'  # Options: 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
@@ -141,23 +138,18 @@ def main():
             'dropout_rates': [0.3, 0.3, 0.3, 0.3],
         }
 
-
-
     # Set up paths for the CSN ECG dataset
-    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
-    wfdb_dir = os.path.join(database_path, 'WFDBRecords')
+    database_path = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0'
     
-    if not os.path.exists(wfdb_dir):
-        print(f"Error: Directory {wfdb_dir} does not exist.")
-        print("Current directory structure:")
-        print_directory_structure(base_path)
-        return
-
     # Gather all record names
     data_entries = []
-    for subdir, dirs, files in os.walk(wfdb_dir):
-        data_entries.extend([os.path.join(os.path.relpath(subdir, wfdb_dir), os.path.splitext(file)[0]) 
-                             for file in files if file.endswith('.mat')])
+    if bucket:
+        blobs = list(bucket.list_blobs(prefix=f'{database_path}/'))
+        data_entries = [blob.name.split('/')[-1].split('.')[0] for blob in blobs if blob.name.endswith('.mat')]
+    else:
+        for subdir, dirs, files in os.walk(database_path):
+            data_entries.extend([os.path.join(os.path.relpath(subdir, database_path), os.path.splitext(file)[0]) 
+                                 for file in files if file.endswith('.mat')])
 
     print(f"Total records found for CSN ECG: {len(data_entries)}")
     
@@ -166,10 +158,10 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 45152
+    max_records = 5000
     desired_length = 1000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
-    csv_path = os.path.join(database_path, 'ConditionNames_SNOMED-CT.csv')
+    csv_path = f'{database_path}/ConditionNames_SNOMED-CT.csv'
 
     # Define the class mapping
     class_mapping = {
@@ -179,8 +171,8 @@ def main():
         'SR': ['Sinus rhythm', 'Sinus irregularity']
     }
 
-    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping)
-    X, Y_cl = load_csn_data(wfdb_dir, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=5000)
+    snomed_ct_mapping = load_snomed_ct_mapping(csv_path, class_mapping, bucket)
+    X, Y_cl = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=5000, bucket=bucket)
 
     if X.size == 0 or len(Y_cl) == 0:
         print("Error: No data was loaded. Check the data preprocessing step.")
@@ -239,6 +231,21 @@ def main():
         Y_binarized = Y_binarized[valid_samples]
         print(f"Shape after removing samples with no labels - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
 
+    # Check for rare label combinations
+    label_combinations = [tuple(row) for row in Y_binarized]
+    combination_counts = Counter(label_combinations)
+    print("Label combination counts:", dict(combination_counts))
+
+    # Remove samples with unique label combinations
+    min_combination_count = 2
+    valid_combinations = [comb for comb, count in combination_counts.items() if count >= min_combination_count]
+    valid_indices = [i for i, comb in enumerate(label_combinations) if comb in valid_combinations]
+
+    X = X[valid_indices]
+    Y_binarized = Y_binarized[valid_indices]
+
+    print(f"Shape after removing rare combinations - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
+
     # Split the data into train, validation, and test sets (before scaling)
     test_size = 0.2
     val_size = 0.25  # 25% of the remaining 80% = 20% of total
@@ -283,6 +290,12 @@ def main():
     print(f"\nTrain set shape: {X_train_scaled.shape}, {y_train.shape}")
     print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
     print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
+
+    # Create tf.data.Dataset objects
+    batch_size = 16  # Adjust this based on your GPU memory
+    train_dataset = create_dataset(X_train_scaled, y_train, batch_size=batch_size)
+    valid_dataset = create_dataset(X_valid_scaled, y_valid, batch_size=batch_size, shuffle=False)
+    test_dataset = create_dataset(X_test_scaled, y_test, batch_size=batch_size, shuffle=False)
 
     # Compute class weights for imbalanced dataset
     # For multi-label, compute class weights individually

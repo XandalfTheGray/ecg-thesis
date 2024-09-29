@@ -12,22 +12,30 @@ import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count
 from functools import partial
 import time
+from google.cloud import storage
+import io
 
 # Uncomment for detailed logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_snomed_ct_mapping(csv_path, class_mapping):
+def load_snomed_ct_mapping(csv_path, class_mapping, bucket=None):
     """
     Load SNOMED-CT codes and their corresponding class names from a CSV file.
     
     Args:
     csv_path (str): Path to the CSV file containing SNOMED-CT codes and names.
     class_mapping (dict): Dictionary mapping class names to lists of condition names.
+    bucket (google.cloud.storage.bucket.Bucket, optional): GCS bucket object.
     
     Returns:
     dict: A dictionary mapping SNOMED-CT codes to their corresponding class names.
     """
-    df = pd.read_csv(csv_path)
+    if bucket:
+        blob = bucket.blob(csv_path)
+        content = blob.download_as_text()
+        df = pd.read_csv(io.StringIO(content))
+    else:
+        df = pd.read_csv(csv_path)
     
     condition_to_class = {condition.lower(): class_name 
                           for class_name, conditions in class_mapping.items() 
@@ -145,66 +153,59 @@ def process_record(record, database_path, snomed_ct_mapping, desired_length, plo
     except Exception as e:
         return None, None, f"Error processing record {record}: {str(e)}"
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, num_plots_per_class=1, plot_dir='output_plots/class_ecg_plots/'):
-    """
-    Load and preprocess ECG data from the CSN dataset.
-    
-    Args:
-    database_path (str): Path to the database containing ECG records.
-    data_entries (list): List of record names to process.
-    snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to class names.
-    max_records (int, optional): Maximum number of records to process.
-    desired_length (int): The fixed number of time steps for ECG data.
-    num_plots_per_class (int): Number of ECG signals to plot per class.
-    plot_dir (str): Directory where class-specific ECG plots will be saved.
-    
-    Returns:
-    tuple: Numpy array of processed ECG data (X) and list of corresponding class names (Y_cl).
-    """
-    if not data_entries:
-        logging.error("No data entries found. Check the database path and file extensions.")
-        return np.array([]), []
-
-    if max_records is not None:
-        random.seed(42)
-        data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
-
-    logging.info(f"Processing {len(data_entries)} records")
-
-    start_time = time.time()
-    
-    # Use multiprocessing to process records in parallel
-    num_cores = cpu_count()
-    with Pool(num_cores) as pool:
-        process_func = partial(process_record, database_path=database_path, snomed_ct_mapping=snomed_ct_mapping, 
-                               desired_length=desired_length, plot_dir=plot_dir, num_plots_per_class=num_plots_per_class)
-        results = pool.map(process_func, data_entries)
-
+def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, bucket=None):
     X, Y_cl = [], []
-    diagnosis_counts = {}
-    skipped_records = 0
-    no_code_count = 0
+    client = storage.Client()
+    bucket = client.get_bucket(base_path.replace('gs://', ''))
 
-    for ecg_padded, valid_classes, error_message in results:
-        if ecg_padded is not None and valid_classes:
-            X.append(ecg_padded)
-            Y_cl.append(valid_classes)
-            for cls in valid_classes:
-                diagnosis_counts[cls] = diagnosis_counts.get(cls, 0) + 1
-        elif error_message:
-            if "No SNOMED-CT codes found" in error_message:
-                no_code_count += 1
-            else:
-                skipped_records += 1
-            logging.warning(error_message)
+    for record in data_entries[:max_records]:
+        if bucket:
+            mat_blob = bucket.blob(f'{record}.mat')
+            hea_blob = bucket.blob(f'{record}.hea')
+            
+            if not (mat_blob.exists() and hea_blob.exists()):
+                continue
 
-    end_time = time.time()
-    logging.info(f"Processing time: {end_time - start_time:.2f} seconds")
-    logging.info(f"Processed {len(X)} records")
-    logging.info(f"Skipped {skipped_records} records")
-    logging.info(f"Records with no SNOMED-CT codes: {no_code_count}")
-    logging.info(f"Diagnosis counts: {diagnosis_counts}")
-    
+            # Read .mat file
+            mat_content = mat_blob.download_as_bytes()
+            mat_file = io.BytesIO(mat_content)
+            mat_data = loadmat(mat_file)
+            
+            if 'val' not in mat_data:
+                continue
+            ecg_data = mat_data['val']
+
+            # Read .hea file
+            hea_content = hea_blob.download_as_text()
+            record_header = wfdb.io.header.parse_header(io.StringIO(hea_content))
+        else:
+            mat_file = os.path.join(base_path, f'{record}.mat')
+            hea_file = os.path.join(base_path, f'{record}.hea')
+
+            if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+                continue
+
+            mat_data = loadmat(mat_file)
+            if 'val' not in mat_data:
+                continue
+            ecg_data = mat_data['val']
+
+            record_header = wfdb.rdheader(os.path.join(base_path, record))
+
+        snomed_ct_codes = extract_snomed_ct_codes(record_header)
+
+        if not snomed_ct_codes:
+            continue
+
+        valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
+        if len(valid_classes) > 1 and 'Other' in valid_classes:
+            valid_classes.remove('Other')
+
+        ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
+
+        X.append(ecg_padded)
+        Y_cl.append(valid_classes)
+
     return np.array(X), Y_cl
 
 def find_mat_files(directory):
@@ -282,14 +283,13 @@ def main():
     data_entries = [os.path.relpath(file, database_path)[:-4] for file in mat_files]
     logging.info(f"Prepared {len(data_entries)} data entries for processing")
 
-    X, Y_cl = load_data(
-        database_path, 
+    X, Y_cl = load_csn_data(
+        base_path, 
         data_entries, 
         snomed_ct_mapping, 
         max_records=20000, 
         desired_length=1000, 
-        num_plots_per_class=1,
-        plot_dir='output_plots/class_ecg_plots/'
+        bucket=None
     )
 
     print(f"Loaded data shape - X: {X.shape}, Y_cl: {len(Y_cl)}")
