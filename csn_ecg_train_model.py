@@ -10,20 +10,19 @@ from sklearn.utils import class_weight
 from tensorflow import keras
 from datetime import datetime
 from collections import Counter
-from sklearn.metrics import multilabel_confusion_matrix, classification_report
+from sklearn.metrics import multilabel_confusion_matrix, classification_report, confusion_matrix
 import seaborn as sns
 import sys
 import importlib.util
+import tensorflow as tf
+from tensorflow.keras import mixed_precision
 
-def setup_environment(is_colab=False):
-    if is_colab:
-        from google.colab import drive
-        drive.mount('/content/drive', force_remount=True)
-        base_path = '/content/drive/MyDrive/ecg_thesis_data/'
-        print('GOOGLE COLAB ENVIRONMENT DETECTED')
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        print('LOCAL ENVIRONMENT DETECTED')
+policy = mixed_precision.Policy('mixed_float16')
+mixed_precision.set_global_policy(policy)
+
+def setup_environment():
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    print('LOCAL ENVIRONMENT DETECTED')
     
     print(f'Base Path: {base_path}')
     
@@ -55,10 +54,24 @@ def import_module(module_name):
         print(f"Error importing {module_name}. Make sure the file is in the correct directory.")
         sys.exit(1)
 
+def data_generator(X, y, batch_size):
+    num_samples = X.shape[0]
+    while True:
+        for i in range(0, num_samples, batch_size):
+            yield X[i:i+batch_size], y[i:i+batch_size]
+
+def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
+    dataset = tf.data.Dataset.from_tensor_slices((X, y))
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=len(X))
+    dataset = dataset.batch(batch_size)
+    if prefetch:
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
+
 def main():
     # Setup environment and get base path
-    is_colab = False  # Set this to True if you're running in Colab
-    base_path = setup_environment(is_colab)
+    base_path = setup_environment()
     print(f"Base path set to: {base_path}")
 
     # Import required modules
@@ -212,6 +225,25 @@ def main():
         Y_binarized = Y_binarized[valid_samples]
         print(f"Shape after removing samples with no labels - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
 
+    # After binarizing the labels
+
+    # Check for rare label combinations
+    label_combinations = [tuple(row) for row in Y_binarized]
+    combination_counts = Counter(label_combinations)
+    print("Label combination counts:", dict(combination_counts))
+
+    # Remove samples with unique label combinations
+    min_combination_count = 2
+    valid_combinations = [comb for comb, count in combination_counts.items() if count >= min_combination_count]
+    valid_indices = [i for i, comb in enumerate(label_combinations) if comb in valid_combinations]
+
+    X = X[valid_indices]
+    Y_binarized = Y_binarized[valid_indices]
+
+    print(f"Shape after removing rare combinations - X: {X.shape}, Y_binarized: {Y_binarized.shape}")
+
+    # Then proceed with the train_test_split as before
+
     # Split the data into train, validation, and test sets (before scaling)
     test_size = 0.2
     val_size = 0.25  # 25% of the remaining 80% = 20% of total
@@ -257,18 +289,21 @@ def main():
     print(f"Validation set shape: {X_valid_scaled.shape}, {y_valid.shape}")
     print(f"Test set shape: {X_test_scaled.shape}, {y_test.shape}")
 
+    # Create tf.data.Dataset objects
+    batch_size = 16  # Adjust this based on your GPU memory
+    train_dataset = create_dataset(X_train_scaled, y_train, batch_size=batch_size)
+    train_dataset = train_dataset.cache()
+    valid_dataset = create_dataset(X_valid_scaled, y_valid, batch_size=batch_size, shuffle=False)
+    test_dataset = create_dataset(X_test_scaled, y_test, batch_size=batch_size, shuffle=False)
+
     # Compute class weights for imbalanced dataset
-    # For multi-label, compute class weights individually
     class_weights = {}
     for i, class_label in enumerate(label_names):
-        # Compute class weight based on the frequency of each class
         class_count = y_train[:, i].sum()
         if class_count == 0:
             class_weights[i] = 1.0
         else:
             class_weights[i] = (len(y_train) / (num_classes * class_count))
-    # Alternatively, use sklearn's compute_class_weight for each class
-    # This implementation is a simplified approach
 
     # Build the neural network model
     if model_type == 'cnn':
@@ -330,44 +365,63 @@ def main():
         )
     ]
 
-    # Train the model using scaled data
+    # Train the model using tf.data.Dataset
+    steps_per_epoch = len(X_train_scaled) // batch_size
+    validation_steps = len(X_valid_scaled) // batch_size
+
     history = model.fit(
-        X_train_scaled, y_train, 
-        epochs=30, 
-        validation_data=(X_valid_scaled, y_valid),
-        batch_size=256, 
-        shuffle=True, 
-        callbacks=callbacks, 
+        train_dataset,
+        epochs=30,
+        steps_per_epoch=steps_per_epoch,
+        validation_data=valid_dataset,
+        validation_steps=validation_steps,
+        callbacks=callbacks,
         class_weight=class_weights
     )
-    
-    # Define evaluation function
-    def evaluate_model(dataset, y_true, name, output_dir, label_names):
-        y_pred_prob = model.predict(dataset)
-        y_pred = (y_pred_prob >= 0.5).astype(int)
-        
-        print(f"\n{name} Performance")
-        print(classification_report(y_true, y_pred, target_names=label_names))
-        
-        # Compute confusion matrix for each class
-        conf_matrices = multilabel_confusion_matrix(y_true, y_pred)
-        
-        # Plot confusion matrix for each class
-        for i, conf_matrix in enumerate(conf_matrices):
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues')
-            plt.title(f'Confusion Matrix for {label_names[i]} - {name} Set')
-            plt.ylabel('True label')
-            plt.xlabel('Predicted label')
-            plt.savefig(os.path.join(output_dir, f'confusion_matrix_{name.lower()}_{label_names[i]}.png'))
-            plt.close()
 
-    # Evaluate the model on scaled data
-    evaluate_model(X_train_scaled, y_train, 'Training', output_dir, label_names)
-    evaluate_model(X_valid_scaled, y_valid, 'Validation', output_dir, label_names)
-    evaluate_model(X_test_scaled, y_test, 'Test', output_dir, label_names)
+    # Evaluate the model
+    print("\nEvaluating the model on the test set:")
+    test_steps = len(X_test_scaled) // batch_size
+    test_loss, test_accuracy = model.evaluate(test_dataset, steps=test_steps)
+    print(f"Test Loss: {test_loss:.4f}")
+    print(f"Test Accuracy: {test_accuracy:.4f}")
+
+    # Generate predictions for the test set
+    y_pred = model.predict(test_dataset, steps=test_steps)
+    y_pred_classes = (y_pred > 0.5).astype(int)
+
+    # Print classification report
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred_classes, target_names=label_names))
+
+    # Plot confusion matrix for each class
+    plot_confusion_matrices(y_test, y_pred_classes, label_names, output_dir)
 
     # Plot training history
+    plot_training_history(history, output_dir)
+
+    print(f"\nTraining completed. Results saved in {output_dir}")
+
+    # Save model parameters to a text file
+    with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
+        f.write(f"Dataset: {dataset_name}\n")
+        f.write(f"Model Type: {model_type}\n")
+        f.write("Model Parameters:\n")
+        for key, value in model_params.items():
+            f.write(f"  {key}: {value}\n")
+
+def plot_confusion_matrices(y_true, y_pred, class_names, output_dir):
+    for i, class_name in enumerate(class_names):
+        cm = confusion_matrix(y_true[:, i], y_pred[:, i])
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        plt.title(f'Confusion Matrix for {class_name}')
+        plt.ylabel('True label')
+        plt.xlabel('Predicted label')
+        plt.savefig(os.path.join(output_dir, f'confusion_matrix_{class_name}.png'))
+        plt.close()
+
+def plot_training_history(history, output_dir):
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 2, 1)
     plt.plot(history.history['loss'], label='Train Loss')
@@ -388,14 +442,6 @@ def main():
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'training_history.png'))
     plt.close()
-
-    # Save model parameters to a text file
-    with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
-        f.write(f"Dataset: {dataset_name}\n")
-        f.write(f"Model Type: {model_type}\n")
-        f.write("Model Parameters:\n")
-        for key, value in model_params.items():
-            f.write(f"  {key}: {value}\n")
 
 def print_directory_structure(startpath):
     for root, dirs, files in os.walk(startpath):
