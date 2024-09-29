@@ -21,6 +21,7 @@ from tqdm import tqdm
 import tensorflow as tf
 import importlib
 import logging
+import concurrent.futures
 
 def download_blob(blob, base_path):
     destination_path = os.path.join(base_path, blob.name)
@@ -83,6 +84,56 @@ def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
     if prefetch:
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
+
+def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, bucket=None):
+    X, Y_cl = [], []
+    client = storage.Client()
+    bucket = client.get_bucket(base_path.replace('gs://', ''))
+    
+    logging.info(f"Starting to load data from {len(data_entries)} records")
+    
+    # Function to process a single record
+    def process_record(record):
+        # ... (keep the existing code for processing a single record)
+        return ecg_padded, valid_classes
+
+    # Use ThreadPoolExecutor for parallel processing
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        future_to_record = {executor.submit(process_record, record): record for record in data_entries[:max_records]}
+        
+        for future in tqdm(concurrent.futures.as_completed(future_to_record), total=len(future_to_record), desc="Loading records"):
+            record = future_to_record[future]
+            try:
+                ecg_padded, valid_classes = future.result()
+                if ecg_padded is not None and valid_classes:
+                    X.append(ecg_padded)
+                    Y_cl.append(valid_classes)
+            except Exception as exc:
+                logging.error(f'{record} generated an exception: {exc}')
+
+    logging.info(f"Loaded {len(X)} records successfully")
+    
+    if len(X) == 0:
+        logging.error("No records were successfully loaded. Check the data files and paths.")
+        return None
+
+    logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
+    
+    # Convert to numpy arrays
+    X = np.array(X)
+    Y = np.array(Y_cl)
+
+    # Create a MultiLabelBinarizer to convert Y_cl to one-hot encoded format
+    mlb = MultiLabelBinarizer()
+    Y_encoded = mlb.fit_transform(Y)
+
+    # Convert to TensorFlow Dataset
+    dataset = tf.data.Dataset.from_tensor_slices((X, Y_encoded))
+    
+    # Use cache and prefetch to optimize memory usage
+    dataset = dataset.cache().prefetch(tf.data.AUTOTUNE)
+
+    return dataset, mlb.classes_
 
 def main():
     # Setup logging
@@ -165,7 +216,7 @@ def main():
 
     # Load and preprocess data
     max_records = 500  
-    #desired_length = 1000
+    desired_length = 500
     print(f"Processing up to {max_records} records for CSN ECG dataset")
 
     # Define the class mapping
@@ -183,17 +234,31 @@ def main():
         print(f"Number of SNOMED-CT codes loaded: {len(snomed_ct_mapping)}")
         
         print("Starting to load and preprocess ECG data...")
-        dataset = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
+        dataset, label_names = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
         print("ECG data loading and preprocessing completed")
         
-        # Split the dataset into train, validation, and test sets
-        train_size = int(0.7 * max_records)
-        val_size = int(0.15 * max_records)
-        test_size = max_records - train_size - val_size
+        if dataset is None:
+            print("Error: No data was loaded. Exiting.")
+            return
 
-        train_dataset = dataset.take(train_size).batch(32).prefetch(tf.data.AUTOTUNE)
-        val_dataset = dataset.skip(train_size).take(val_size).batch(32).prefetch(tf.data.AUTOTUNE)
-        test_dataset = dataset.skip(train_size + val_size).take(test_size).batch(32).prefetch(tf.data.AUTOTUNE)
+        # Get the total size of the dataset
+        total_size = tf.data.experimental.cardinality(dataset).numpy()
+        
+        # Calculate sizes for train, validation, and test sets
+        train_size = int(0.7 * total_size)
+        val_size = int(0.15 * total_size)
+        test_size = total_size - train_size - val_size
+
+        # Split the dataset
+        train_dataset = dataset.take(train_size)
+        remaining = dataset.skip(train_size)
+        val_dataset = remaining.take(val_size)
+        test_dataset = remaining.skip(val_size)
+
+        # Batch and prefetch the datasets
+        train_dataset = train_dataset.batch(32).prefetch(tf.data.AUTOTUNE)
+        val_dataset = val_dataset.batch(32).prefetch(tf.data.AUTOTUNE)
+        test_dataset = test_dataset.batch(32).prefetch(tf.data.AUTOTUNE)
 
         # Get input shape and number of classes from the dataset
         for batch in train_dataset.take(1):
