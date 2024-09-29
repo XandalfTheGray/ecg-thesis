@@ -17,7 +17,6 @@ import sys
 import importlib.util
 import tensorflow as tf
 from tensorflow.keras import mixed_precision
-from google.colab import drive
 
 # Enable mixed precision for better performance and lower memory usage
 policy = mixed_precision.Policy('mixed_float16')
@@ -25,13 +24,11 @@ mixed_precision.set_global_policy(policy)
 
 def setup_environment():
     """
-    Set up the environment for Google Colab with mounted Google Drive.
+    Set up the environment by adding the base path to sys.path and checking for dataset existence.
     """
-    # Mount Google Drive
-    drive.mount('/content/drive')
-
-    # Set the base path to the mounted Google Drive
-    base_path = '/content/drive/MyDrive/your_project_folder'  # Adjust this path as needed
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    print('LOCAL ENVIRONMENT DETECTED')
+    
     print(f'Base Path: {base_path}')
     
     # Add the current directory to the Python path
@@ -41,14 +38,14 @@ def setup_environment():
     # Additional environment checks
     print(f"Python version: {sys.version}")
     print(f"Current working directory: {os.getcwd()}")
-    print(f"Contents of base directory: {os.listdir(base_path)}")
+    print(f"Contents of current directory: {os.listdir('.')}")
     print(f"Python path: {sys.path}")
     
     # Check for dataset existence
     dataset_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
     if not os.path.exists(dataset_path):
         print(f"WARNING: Dataset not found at {dataset_path}")
-        print("Please ensure the CSN ECG dataset is in the correct directory on your Google Drive.")
+        print("Please ensure the CSN ECG dataset is in the correct directory.")
         print("Expected path:", dataset_path)
     else:
         print(f"Dataset found at: {dataset_path}")
@@ -88,7 +85,6 @@ def main():
     print(f"Base path set to: {base_path}")
 
     # Import required modules
-    sys.path.append(base_path)  # Ensure base_path is in sys.path
     models = import_module('models')
     evaluation = import_module('evaluation')
     # Assuming csn_ecg_data_preprocessing.py is only for preprocessing and data is already saved
@@ -137,8 +133,8 @@ def main():
 
     # Load preprocessed data from disk
     try:
-        X = np.load(os.path.join(base_path, 'preprocessed_data/X.npy'))
-        Y_cl = np.load(os.path.join(base_path, 'preprocessed_data/Y.npy'), allow_pickle=True)
+        X = np.load('preprocessed_data/X.npy')
+        Y_cl = np.load('preprocessed_data/Y.npy', allow_pickle=True)
     except FileNotFoundError as e:
         print(f"Error: {e}")
         print("Ensure that you have run the preprocessing script `csn_ecg_data_preprocessing.py` successfully.")

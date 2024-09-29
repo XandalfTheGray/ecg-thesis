@@ -3,15 +3,11 @@
 
 import numpy as np
 import os
-import random
+import logging
 from scipy.io import loadmat
 import wfdb
-import logging
 import pandas as pd
 import matplotlib.pyplot as plt
-from multiprocessing import Pool, cpu_count
-from functools import partial
-import time
 from google.cloud import storage
 import io
 from tqdm import tqdm
@@ -19,8 +15,8 @@ import concurrent.futures
 import tensorflow as tf
 from sklearn.preprocessing import MultiLabelBinarizer
 
-# Uncomment for detailed logging
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_snomed_ct_mapping(csv_path, class_mapping, bucket=None):
     """
@@ -37,20 +33,26 @@ def load_snomed_ct_mapping(csv_path, class_mapping, bucket=None):
     try:
         if bucket:
             blob = bucket.blob(csv_path)
+            if not blob.exists():
+                raise FileNotFoundError(f"CSV file not found in GCS bucket at: {csv_path}")
             content = blob.download_as_text()
             df = pd.read_csv(io.StringIO(content))
             print(f"Downloaded and read CSV from GCS: {csv_path}")
         else:
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"CSV file not found at local path: {csv_path}")
             df = pd.read_csv(csv_path)
             print(f"Read CSV from local path: {csv_path}")
     except Exception as e:
         logging.error(f"Failed to load CSV file at {csv_path}: {e}")
         raise
     
+    # Map condition names to classes
     condition_to_class = {condition.lower(): class_name 
                           for class_name, conditions in class_mapping.items() 
                           for condition in conditions}
     
+    # Create mapping from SNOMED-CT codes to classes
     mapping = {str(row['Snomed_CT']): condition_to_class.get(row['Full Name'].lower(), 'Other') 
                for _, row in df.iterrows()}
     
@@ -119,7 +121,7 @@ def process_record(record, database_path, snomed_ct_mapping, desired_length, plo
     
     Args:
     record (str): Relative path of the ECG record within WFDBRecords (e.g., '01/010/JS00001').
-    database_path (str): Path to the database containing ECG records.
+    database_path (str): Path to the WFDBRecords directory within the bucket.
     snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to class names.
     desired_length (int): The desired number of time steps for ECG data.
     plot_dir (str): Directory where ECG plots will be saved.
@@ -132,97 +134,93 @@ def process_record(record, database_path, snomed_ct_mapping, desired_length, plo
     mat_file = f'{database_path}/{record}.mat'
     hea_file = f'{database_path}/{record}.hea'
 
-    if not bucket:
-        # Local file system access (if bucket is None)
-        if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-            return None, None, f"Files not found for record {record}"
-
-        try:
-            mat_data = loadmat(mat_file)
-            if 'val' not in mat_data:
-                return None, None, f"'val' key not found in mat file for record {record}"
-            ecg_data = mat_data['val']
-
-            if ecg_data.ndim != 2:
-                return None, None, f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}"
-
-            record_header = wfdb.rdheader(os.path.join(database_path, record))
-            snomed_ct_codes = extract_snomed_ct_codes(record_header)
-
-            if not snomed_ct_codes:
-                return None, None, f"No SNOMED-CT codes found for record {record}"
-
-            valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
-            if len(valid_classes) > 1 and 'Other' in valid_classes:
-                valid_classes.remove('Other')
-
-            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
-
-            # Plot ECG signals per class (if needed)
-            if num_plots_per_class > 0:
-                plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
-
-            return ecg_padded, valid_classes, None
-        except Exception as e:
-            return None, None, f"Error processing record {record}: {str(e)}"
-    else:
-        # GCS access
-        try:
-            # Construct blob paths
+    try:
+        if bucket:
+            # Access files from GCS
             mat_blob = bucket.blob(mat_file)
             hea_blob = bucket.blob(hea_file)
 
             if not mat_blob.exists():
-                raise FileNotFoundError(f"Mat file not found: {mat_file}")
+                raise FileNotFoundError(f"Mat file not found in GCS: {mat_file}")
             if not hea_blob.exists():
-                raise FileNotFoundError(f"Hea file not found: {hea_file}")
+                raise FileNotFoundError(f"Hea file not found in GCS: {hea_file}")
 
             # Download content
             mat_content = mat_blob.download_as_bytes()
             hea_content = hea_blob.download_as_string().decode('utf-8')
+            logging.info(f"Successfully downloaded {mat_file} and {hea_file} from GCS.")
+        else:
+            # Access files from local filesystem
+            if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+                return None, None, f"Files not found for record {record}"
+            
+            mat_data = loadmat(mat_file)
+            if 'val' not in mat_data:
+                return None, None, f"'val' key not found in mat file for record {record}"
+            ecg_data = mat_data['val']
+            
+            with open(hea_file, 'r') as f:
+                hea_content = f.read()
+            logging.info(f"Successfully read {mat_file} and {hea_file} from local filesystem.")
 
-            # Load mat file
+        # Load mat file content
+        if bucket:
             mat_data = loadmat(io.BytesIO(mat_content))
             ecg_data = mat_data['val']
+        
+        if ecg_data.ndim != 2:
+            return None, None, f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}"
 
-            if ecg_data.ndim != 2:
-                return None, None, f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}"
+        # Extract SNOMED-CT codes from header
+        snomed_ct_codes = extract_snomed_ct_codes(hea_content)
+        if not snomed_ct_codes:
+            return None, None, f"No SNOMED-CT codes found for record {record}"
 
-            # Process header content
-            snomed_ct_codes = extract_snomed_ct_codes(hea_content)
+        # Map codes to class names
+        valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
+        if len(valid_classes) > 1 and 'Other' in valid_classes:
+            valid_classes.remove('Other')
 
-            if not snomed_ct_codes:
-                return None, None, f"No SNOMED-CT codes found for record {record}"
+        # Pad or truncate ECG data
+        ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
 
-            valid_classes = list(set(snomed_ct_mapping.get(code, 'Other') for code in snomed_ct_codes))
-            if len(valid_classes) > 1 and 'Other' in valid_classes:
-                valid_classes.remove('Other')
+        # Plot ECG signals per class (if needed)
+        if num_plots_per_class > 0:
+            plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
 
-            # Pad or truncate ECG data
-            ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
+        return ecg_padded, valid_classes, None
 
-            # Plot ECG signals per class (if needed)
-            if num_plots_per_class > 0:
-                plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
-
-            return ecg_padded, valid_classes, None
-        except Exception as e:
-            return None, None, f"Error processing record {record}: {str(e)}"
+    except Exception as e:
+        return None, None, f"Error processing record {record}: {str(e)}"
 
 def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, desired_length=5000, plot_dir='plots', num_plots_per_class=0, bucket=None):
+    """
+    Load and preprocess the CSN ECG data.
+    
+    Args:
+    base_path (str): Path to the WFDBRecords directory within the bucket.
+    data_entries (list): List of record names (relative paths) to process.
+    snomed_ct_mapping (dict): Mapping of SNOMED-CT codes to class names.
+    max_records (int, optional): Maximum number of records to process.
+    desired_length (int): Desired number of time steps for ECG data.
+    plot_dir (str): Directory to save ECG plots.
+    num_plots_per_class (int): Number of ECG signals to plot per class.
+    bucket (google.cloud.storage.bucket.Bucket, optional): GCS bucket object.
+    
+    Returns:
+    tuple: TensorFlow Dataset and list of class names, or (None, None) on failure.
+    """
     X, Y_cl = [], []
-    client = storage.Client()
-    if bucket is None:
-        bucket_obj = None
-    else:
-        bucket_obj = client.get_bucket(bucket)
     
     logging.info(f"Starting to load data from {len(data_entries)} records")
+    
+    # Limit the number of records to process
+    records_to_process = data_entries[:max_records] if max_records else data_entries
     
     # Use ThreadPoolExecutor for parallel processing
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         futures = []
-        for record in data_entries[:max_records]:
+        for record in records_to_process:
             futures.append(executor.submit(
                 process_record, 
                 record, 
@@ -231,7 +229,7 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
                 desired_length, 
                 plot_dir, 
                 num_plots_per_class, 
-                bucket_obj
+                bucket
             ))
         
         for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Loading records"):
@@ -274,7 +272,7 @@ def find_mat_files(directory):
     directory (str): The directory to search in.
     
     Returns:
-    list: A list of paths to .mat files relative to the directory.
+    list: A list of record names relative to the WFDBRecords directory.
     """
     mat_files = []
     for root, dirs, files in os.walk(directory):
@@ -289,9 +287,6 @@ def main():
     """
     Main function to demonstrate the usage of the data preprocessing functions.
     """
-    # Setup logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
     # Setup environment
     is_colab = True  # Set to True if running in Colab
     bucket_name = 'csn-ecg-dataset'  # Your GCS bucket name
@@ -300,56 +295,56 @@ def main():
         from google.colab import auth
         auth.authenticate_user()
         client = storage.Client()
-        bucket = client.get_bucket(bucket_name)
-        print('GOOGLE COLAB ENVIRONMENT DETECTED')
+        try:
+            bucket = client.get_bucket(bucket_name)
+            print('GOOGLE COLAB ENVIRONMENT DETECTED')
+        except Exception as e:
+            logging.error(f"Failed to access bucket {bucket_name}: {e}")
+            return
     else:
         bucket = None
         print('LOCAL ENVIRONMENT DETECTED')
 
-    # Set the base path within the bucket
-    base_path = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0'
-    database_path = f'{base_path}/WFDBRecords'
-    csv_path = f'{base_path}/ConditionNames_SNOMED-CT.csv'
+    # Set the base path within the bucket (relative path)
+    base_path = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords'
+    csv_path = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/ConditionNames_SNOMED-CT.csv'
 
     # Check if paths exist (for local access)
     if not is_colab:
         if not os.path.exists(base_path):
             logging.error(f"Base path does not exist: {base_path}")
             return
-        if not os.path.exists(database_path):
-            logging.error(f"Database path does not exist: {database_path}")
-            return
         if not os.path.exists(csv_path):
             logging.error(f"CSV file does not exist: {csv_path}")
             return
 
     print(f"Base path: {base_path}")
-    print(f"Database path: {database_path}")
     print(f"CSV path: {csv_path}")
 
-    # List contents of the base path (for debugging)
+    # List contents of the WFDBRecords directory (for debugging)
     if is_colab and bucket:
-        print(f"Listing first 10 contents of {database_path}:")
-        blobs = list(bucket.list_blobs(prefix=database_path, max_results=10))
+        print(f"Listing first 10 contents of {base_path}:")
+        blobs = list(bucket.list_blobs(prefix=base_path, max_results=10))
         for blob in blobs:
             print(f" - {blob.name}")
     else:
-        print(f"Contents of base path:")
+        print(f"Contents of WFDBRecords directory:")
         for item in os.listdir(base_path):
             print(f"  {item}")
 
     # Find all .mat files
     if is_colab and bucket:
-        mat_files = list(bucket.list_blobs(prefix=database_path))
         mat_records = []
-        for blob in mat_files:
+        blobs = list(bucket.list_blobs(prefix=base_path))
+        for blob in blobs:
             if blob.name.endswith('.mat'):
-                relative_path = os.path.relpath(blob.name, database_path)
+                # Extract the record name relative to WFDBRecords/
+                relative_path = os.path.relpath(blob.name, base_path)
                 record_name = os.path.splitext(relative_path)[0]  # Remove '.mat'
                 mat_records.append(record_name)
         print(f"Found {len(mat_records)} .mat files in GCS.")
     else:
-        mat_records = find_mat_files(database_path)
+        mat_records = find_mat_files(base_path)
         print(f"Found {len(mat_records)} .mat files in local directory.")
 
     if len(mat_records) == 0:
@@ -382,14 +377,14 @@ def main():
     # Load and preprocess data
     try:
         dataset, classes = load_csn_data(
-            base_path=database_path,
+            base_path=base_path,
             data_entries=mat_records,
             snomed_ct_mapping=snomed_ct_mapping,
             max_records=max_records,
             desired_length=desired_length,
             plot_dir=plot_dir,
             num_plots_per_class=num_plots_per_class,
-            bucket=bucket_name if is_colab else None
+            bucket=bucket
         )
         
         if dataset is None or classes is None:
