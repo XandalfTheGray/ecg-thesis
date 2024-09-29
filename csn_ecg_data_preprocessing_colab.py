@@ -51,20 +51,20 @@ def load_snomed_ct_mapping(csv_path, class_mapping, bucket=None):
     logging.info(f"Loaded {len(mapping)} SNOMED-CT codes from CSV")
     return mapping
 
-def extract_snomed_ct_codes(header):
+def extract_snomed_ct_codes(header_content):
     """
-    Extract all SNOMED-CT codes from the header of an ECG record.
+    Extract all SNOMED-CT codes from the header content of an ECG record.
     
     Args:
-    header (wfdb.io.record.Record): The header of an ECG record.
+    header_content (str): The content of the header file.
     
     Returns:
     list: A list of extracted SNOMED-CT codes, or an empty list if none found.
     """
-    for comment in header.comments:
-        if comment.startswith('Dx:'):
-            return [code.strip() for code in comment.split(':')[1].strip().split(',')]
-    logging.warning(f"No Dx field found in header comments: {header.comments}")
+    for line in header_content.split('\n'):
+        if line.startswith('Dx:'):
+            return [code.strip() for code in line.split(':')[1].strip().split(',')]
+    logging.warning(f"No Dx field found in header content")
     return []
 
 def pad_ecg_data(ecg_data, desired_length):
@@ -166,13 +166,15 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     # Function to process a single record
     def process_record(record):
-        mat_file = f'{base_path}/WFDBRecords/{record}.mat'
-        hea_file = f'{base_path}/WFDBRecords/{record}.hea'
+        # Construct the correct path for .mat and .hea files
+        record_path = f'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/{record[:2]}/{record[:3]}/{record}'
+        mat_file = f'{base_path}/{record_path}.mat'
+        hea_file = f'{base_path}/{record_path}.hea'
 
         try:
             # Download files from GCS
-            mat_blob = bucket.blob(mat_file)
-            hea_blob = bucket.blob(hea_file)
+            mat_blob = bucket.blob(mat_file.replace(f'{base_path}/', ''))
+            hea_blob = bucket.blob(hea_file.replace(f'{base_path}/', ''))
             mat_content = mat_blob.download_as_bytes()
             hea_content = hea_blob.download_as_string().decode('utf-8')
 

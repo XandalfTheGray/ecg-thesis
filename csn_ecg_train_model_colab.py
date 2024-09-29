@@ -13,7 +13,6 @@ from collections import Counter
 from sklearn.metrics import multilabel_confusion_matrix, classification_report
 import seaborn as sns
 import sys
-import importlib.util
 from google.colab import auth, drive
 from google.cloud import storage
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -49,7 +48,7 @@ def setup_environment(is_colab=False, bucket_name=None):
         print(f"Accessing GCS bucket: {bucket_name}")
         
         # List files in the bucket to verify access
-        blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/', max_results=10))
+        blobs = list(bucket.list_blobs(prefix='a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/WFDBRecords/', max_results=10))
         
         if not blobs:
             print(f"WARNING: No files found in the specified path in the GCS bucket.")
@@ -75,7 +74,7 @@ def import_module(module_name):
     try:
         return importlib.import_module(module_name)
     except ImportError:
-        print(f"Error importing {module_name}. Please make sure it's installed.")
+        print(f"Error importing {module_name}. Please make sure it's installed and in the correct location.")
         return None
 
 def create_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
@@ -163,6 +162,11 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     return dataset, mlb.classes_
 
 def main():
+    # Add this at the beginning of the main function
+    print("Contents of the current directory:")
+    for item in os.listdir():
+        print(item)
+
     # Setup logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -176,6 +180,10 @@ def main():
     models = import_module('models')
     evaluation = import_module('evaluation')
     csn_ecg_data_preprocessing_colab = import_module('csn_ecg_data_preprocessing_colab')
+
+    if not all([models, evaluation, csn_ecg_data_preprocessing_colab]):
+        print("Error: One or more required modules could not be imported. Please check the module files and their locations.")
+        return
 
     # Now you can use the imported modules
     build_cnn = models.build_cnn
@@ -229,11 +237,18 @@ def main():
     if bucket:
         prefix = f'{database_path}/WFDBRecords/'
         blobs = list(bucket.list_blobs(prefix=prefix))
-        data_entries = [blob.name.split('/')[-1].split('.')[0] for blob in blobs if blob.name.endswith('.mat')]
+        for blob in blobs:
+            if blob.name.endswith('.mat'):
+                # Extract the record name from the full path
+                record_name = blob.name.split('/')[-1].split('.')[0]
+                data_entries.append(record_name)
     else:
-        for subdir, dirs, files in os.walk(database_path):
-            data_entries.extend([os.path.join(os.path.relpath(subdir, database_path), os.path.splitext(file)[0]) 
-                                 for file in files if file.endswith('.mat')])
+        for root, dirs, files in os.walk(database_path):
+            for file in files:
+                if file.endswith('.mat'):
+                    # Extract the record name from the full path
+                    record_name = os.path.splitext(file)[0]
+                    data_entries.append(record_name)
 
     print(f"Total records found for CSN ECG: {len(data_entries)}")
     
