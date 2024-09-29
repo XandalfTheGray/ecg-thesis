@@ -25,9 +25,11 @@ mixed_precision.set_global_policy(policy)
 
 def setup_environment():
     """Set up the environment for Google Colab with mounted Google Drive."""
-    drive.mount('/content/drive')
     base_path = '/content/drive/MyDrive'
     print(f'Base Path: {base_path}')
+    
+    if not os.path.exists(base_path):
+        raise RuntimeError("Google Drive is not mounted. Please mount it manually before running this script.")
     
     # Add the base path to sys.path to allow importing custom modules
     if base_path not in sys.path:
