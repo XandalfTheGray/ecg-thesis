@@ -225,7 +225,7 @@ def load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=None, 
     
     if len(X) == 0:
         logging.error("No records were successfully loaded. Check the data files and paths.")
-        return None, None  # Return None, None instead of just None
+        return None, None
 
     logging.info(f"Final X shape: {np.array(X).shape}, Y_cl length: {len(Y_cl)}")
     

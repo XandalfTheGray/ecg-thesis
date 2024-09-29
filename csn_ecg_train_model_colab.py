@@ -282,6 +282,10 @@ def main():
         print(f"Number of SNOMED-CT codes loaded: {len(snomed_ct_mapping)}")
         
         print("Starting to load and preprocess ECG data...")
+        print(f"Base path: {base_path}")
+        print(f"Number of data entries: {len(data_entries)}")
+        print(f"First 5 data entries: {data_entries[:5]}")
+        
         dataset, label_names = load_csn_data(base_path, data_entries, snomed_ct_mapping, max_records=max_records, desired_length=desired_length, bucket=bucket)
         
         if dataset is None or label_names is None:
