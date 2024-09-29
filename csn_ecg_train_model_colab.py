@@ -164,8 +164,8 @@ def main():
         return
 
     # Load and preprocess data
-    max_records = 50000  # Increased from 5000 to 50000
-    desired_length = 1000
+    max_records = 500  
+    #desired_length = 1000
     print(f"Processing up to {max_records} records for CSN ECG dataset")
 
     # Define the class mapping
