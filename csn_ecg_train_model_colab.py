@@ -14,8 +14,15 @@ from sklearn.metrics import multilabel_confusion_matrix, classification_report
 import seaborn as sns
 import sys
 import importlib.util
-from google.colab import auth
+from google.colab import auth, drive
 from google.cloud import storage
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+def download_blob(blob, base_path):
+    destination_path = os.path.join(base_path, blob.name)
+    os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+    blob.download_to_filename(destination_path)
 
 def setup_environment(is_colab=False, bucket_name=None):
     if is_colab:
@@ -24,36 +31,32 @@ def setup_environment(is_colab=False, bucket_name=None):
         
         print('GOOGLE COLAB ENVIRONMENT DETECTED')
         
-        # Authenticate and create a GCS client
+        # Authenticate
         auth.authenticate_user()
-        gcs_client = storage.Client()
         
-        print(f"Attempting to access bucket: {bucket_name}")
+        # Mount Google Drive
+        drive.mount('/content/drive')
         
-        try:
-            bucket = gcs_client.get_bucket(bucket_name)
-        except Exception as e:
-            print(f"Error accessing bucket: {str(e)}")
-            raise
+        # Set up the path to the mounted GCS bucket
+        base_path = f'/content/drive/MyDrive/gcs/{bucket_name}'
         
-        # Create a temporary directory to mount the GCS data
-        base_path = '/tmp/ecg_thesis_data'
-        os.makedirs(base_path, exist_ok=True)
+        # Check if the bucket is already mounted
+        if not os.path.exists(base_path):
+            print(f"Mounting GCS bucket: {bucket_name}")
+            
+            # Create the directory for mounting
+            os.makedirs(base_path, exist_ok=True)
+            
+            # Use gcsfuse to mount the bucket (you may need to install gcsfuse)
+            !gcsfuse --implicit-dirs {bucket_name} {base_path}
+        else:
+            print(f"GCS bucket already mounted at: {base_path}")
         
-        # Download the contents of the bucket to the temporary directory
-        prefix = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/'
-        blobs = bucket.list_blobs(prefix=prefix)
-        for blob in blobs:
-            destination_path = os.path.join(base_path, blob.name)
-            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-            blob.download_to_filename(destination_path)
-        
-        print(f'Data downloaded from GCS bucket: {bucket_name}')
+        print(f'Base Path (Mounted GCS bucket): {base_path}')
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
         print('LOCAL ENVIRONMENT DETECTED')
-    
-    print(f'Base Path: {base_path}')
+        print(f'Base Path: {base_path}')
     
     # Add the current directory to the Python path
     if base_path not in sys.path:
@@ -62,14 +65,14 @@ def setup_environment(is_colab=False, bucket_name=None):
     # Additional environment checks
     print(f"Python version: {sys.version}")
     print(f"Current working directory: {os.getcwd()}")
-    print(f"Contents of current directory: {os.listdir('.')}")
+    print(f"Contents of base directory: {os.listdir(base_path)}")
     print(f"Python path: {sys.path}")
     
     # Check for dataset existence
     dataset_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0')
     if not os.path.exists(dataset_path):
         print(f"WARNING: Dataset not found at {dataset_path}")
-        print("Please ensure the CSN ECG dataset is in the correct directory.")
+        print("Please ensure the CSN ECG dataset is in the correct directory in the GCS bucket.")
         print("Expected path:", dataset_path)
     else:
         print(f"Dataset found at: {dataset_path}")
@@ -86,7 +89,7 @@ def import_module(module_name):
 def main():
     # Setup environment and get base path
     is_colab = True  # Set this to True if you're running in Colab
-    bucket_name = 'csn-ecg-dataset'  # Your GCS bucket name without any prefix
+    bucket_name = 'csn-ecg-dataset'  # Your GCS bucket name
     base_path = setup_environment(is_colab, bucket_name)
     print(f"Base path set to: {base_path}")
 
@@ -153,12 +156,8 @@ def main():
     # Gather all record names
     data_entries = []
     for subdir, dirs, files in os.walk(wfdb_dir):
-        for file in files:
-            if file.endswith('.mat'):
-                record_path = os.path.join(subdir, file)
-                record_name = os.path.relpath(record_path, wfdb_dir)
-                record_name = os.path.splitext(record_name)[0]  # Remove the .mat extension
-                data_entries.append(record_name)
+        data_entries.extend([os.path.join(os.path.relpath(subdir, wfdb_dir), os.path.splitext(file)[0]) 
+                             for file in files if file.endswith('.mat')])
 
     print(f"Total records found for CSN ECG: {len(data_entries)}")
     
