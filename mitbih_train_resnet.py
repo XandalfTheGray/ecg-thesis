@@ -6,9 +6,11 @@ import matplotlib.pyplot as plt
 from sklearn.utils import class_weight
 from tensorflow import keras
 
+# Update this import
+from evaluation import print_stats, showConfusionMatrix, CustomProgressBar
+
 # Import models and evaluation
 from models import build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
-from evaluation import print_stats, showConfusionMatrix
 
 # Import data preprocessing functions
 from mitbih_data_preprocessing import prepare_mitbih_data
@@ -87,9 +89,11 @@ def main():
         validation_data=(X_valid, y_nn_valid),
         class_weight=class_weight_dict,
         callbacks=[
+            CustomProgressBar(),
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
             keras.callbacks.ReduceLROnPlateau(factor=0.1, patience=5)
-        ]
+        ],
+        verbose=0
     )
 
     # Evaluate

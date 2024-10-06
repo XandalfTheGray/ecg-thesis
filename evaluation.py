@@ -10,6 +10,26 @@ from sklearn.metrics import (accuracy_score,
 import os
 import numpy as np
 from matplotlib.colors import ListedColormap
+from tensorflow import keras
+import time
+
+# Add the CustomProgressBar class here
+class CustomProgressBar(keras.callbacks.Callback):
+    def on_epoch_begin(self, epoch, logs=None):
+        self.epoch_start_time = time.time()
+        print(f"\nEpoch {epoch+1}/{self.params['epochs']}")
+        self.seen = 0
+        self.target = self.params['steps']
+
+    def on_batch_end(self, batch, logs=None):
+        self.seen += 1
+        if self.seen % 10 == 0 or self.seen == self.target:
+            print(f"\r{self.seen}/{self.target} - loss: {logs['loss']:.4f} - accuracy: {logs['accuracy']:.4f}", end='')
+
+    def on_epoch_end(self, epoch, logs=None):
+        epoch_time = time.time() - self.epoch_start_time
+        print(f"\nval_loss: {logs['val_loss']:.4f} - val_accuracy: {logs['val_accuracy']:.4f}")
+        print(f"Time: {epoch_time:.2f}s")
 
 def create_output_directory(database, model):
     """

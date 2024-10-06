@@ -2,6 +2,7 @@
 from keras import layers, models
 from keras.regularizers import l2
 from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization, MultiHeadAttention, LayerNormalization, Dense
+from tensorflow.keras.layers import MultiHeadAttention, LayerNormalization, Dense, Dropout, GlobalAveragePooling1D
 
 # models.py
 
@@ -289,6 +290,35 @@ def build_transformer(input_shape, num_classes, head_size, num_heads, ff_dim, nu
         x = transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
 
     x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
+    for dim in mlp_units:
+        x = Dense(dim, activation="relu")(x)
+        x = Dropout(mlp_dropout)(x)
+    outputs = Dense(num_classes, activation=activation)(x)
+    return models.Model(inputs, outputs)
+
+def transformer_encoder_tf(inputs, head_size, num_heads, ff_dim, dropout=0):
+    # Normalization and Attention
+    x = LayerNormalization(epsilon=1e-6)(inputs)
+    x = MultiHeadAttention(
+        key_dim=head_size, num_heads=num_heads, dropout=dropout
+    )(x, x)
+    x = Dropout(dropout)(x)
+    res = x + inputs
+
+    # Feed Forward Part
+    x = LayerNormalization(epsilon=1e-6)(res)
+    x = Dense(ff_dim, activation="relu")(x)
+    x = Dropout(dropout)(x)
+    x = Dense(inputs.shape[-1])(x)
+    return x + res
+
+def build_transformer_tf(input_shape, num_classes, head_size, num_heads, ff_dim, num_transformer_blocks, mlp_units, dropout=0, mlp_dropout=0, activation='softmax', **kwargs):
+    inputs = Input(shape=input_shape)
+    x = inputs
+    for _ in range(num_transformer_blocks):
+        x = transformer_encoder_tf(x, head_size, num_heads, ff_dim, dropout)
+
+    x = GlobalAveragePooling1D(data_format="channels_first")(x)
     for dim in mlp_units:
         x = Dense(dim, activation="relu")(x)
         x = Dropout(mlp_dropout)(x)

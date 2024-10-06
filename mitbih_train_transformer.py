@@ -9,7 +9,7 @@ import tensorflow as tf
 
 # Import models and evaluation
 from models import build_transformer
-from evaluation import print_stats, showConfusionMatrix
+from evaluation import print_stats, showConfusionMatrix, CustomProgressBar
 
 # Import data preprocessing functions
 from mitbih_data_preprocessing import prepare_mitbih_data
@@ -94,9 +94,11 @@ def main():
         shuffle=True, 
         class_weight=class_weight_dict,
         callbacks=[
+            CustomProgressBar(),
             keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
             keras.callbacks.ReduceLROnPlateau(factor=0.1, patience=5)
-        ]
+        ],
+        verbose=0
     )
 
     # Evaluate
