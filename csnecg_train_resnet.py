@@ -14,11 +14,11 @@ import argparse
 
 def setup_environment():
     """Set up the environment for Google Colab with mounted Google Drive."""
-    base_path = '/content/drive/MyDrive'
+    base_path = '/content/ecg-thesis'  # Change this to the correct path
     print(f'Base Path: {base_path}')
     
     if not os.path.exists(base_path):
-        raise RuntimeError("Google Drive is not mounted. Please mount it manually before running this script.")
+        raise RuntimeError("The specified directory does not exist. Please check the path.")
     
     if base_path not in sys.path:
         sys.path.append(base_path)
@@ -28,9 +28,13 @@ def setup_environment():
 def import_module(module_name):
     """Dynamically import a module by name."""
     try:
-        return importlib.import_module(module_name)
-    except ImportError:
-        print(f"Error importing {module_name}. Make sure the file is in the correct directory.")
+        spec = importlib.util.spec_from_file_location(module_name, os.path.join(base_path, f"{module_name}.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception as e:
+        print(f"Error importing {module_name}: {str(e)}")
+        print(f"Make sure the file {module_name}.py is in the directory: {base_path}")
         sys.exit(1)
 
 def main(time_steps, batch_size, resnet_type):
