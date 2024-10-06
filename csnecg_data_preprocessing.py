@@ -1,4 +1,4 @@
-# csn_ecg_data_preprocessing.py
+# csnecg_data_preprocessing.py
 # This script preprocesses the CSN ECG dataset, extracting SNOMED-CT codes and ECG data
 
 import numpy as np
@@ -296,7 +296,7 @@ def create_tf_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
 
-def prepare_csn_ecg_data(time_steps, base_path, batch_size):
+def prepare_csnecg_data(time_steps, base_path, batch_size):
     """
     Prepare CSN ECG data for model training.
     """
