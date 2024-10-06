@@ -21,7 +21,7 @@ from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size, resnet_type):
     # Set up output directories
-    base_path = '/content/drive/MyDrive/ecg-thesis'
+    base_path = '/content/drive/MyDrive/'
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{resnet_type}_{time_steps}steps_{batch_size}batch")

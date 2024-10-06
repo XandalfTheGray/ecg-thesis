@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
 import sys
-import importlib.util
 import tensorflow as tf
 from tensorflow.keras import mixed_precision
 from google.colab import drive
@@ -17,45 +16,17 @@ import argparse
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
 
-def setup_environment():
-    """Set up the environment for Google Colab with mounted Google Drive."""
-    base_path = '/content/ecg-thesis'  # Change this to the correct path
-    print(f'Base Path: {base_path}')
-    
-    if not os.path.exists(base_path):
-        raise RuntimeError("The specified directory does not exist. Please check the path.")
-    
-    if base_path not in sys.path:
-        sys.path.append(base_path)
-    
-    return base_path
+# Add the directory containing your modules to the Python path
+sys.path.append('/content/ecg-thesis')
 
-def import_module(module_name):
-    """Dynamically import a module by name."""
-    try:
-        spec = importlib.util.spec_from_file_location(module_name, os.path.join(base_path, f"{module_name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-    except Exception as e:
-        print(f"Error importing {module_name}: {str(e)}")
-        print(f"Make sure the file {module_name}.py is in the directory: {base_path}")
-        sys.exit(1)
+# Import your modules
+from models import build_transformer
+from evaluation import print_stats, showConfusionMatrix
+from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
-    base_path = setup_environment()
-    print(f"Base path set to: {base_path}")
-
-    sys.path.append(base_path)
-    models = import_module('models')
-    evaluation = import_module('evaluation')
-    csnecg_data_preprocessing = import_module('csnecg_data_preprocessing')
-
-    build_transformer = models.build_transformer
-    print_stats = evaluation.print_stats
-    showConfusionMatrix = evaluation.showConfusionMatrix
-    prepare_csnecg_data = csnecg_data_preprocessing.prepare_csnecg_data
-
+    # Set up output directories
+    base_path = '/content/drive/MyDrive/'
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'transformer'
