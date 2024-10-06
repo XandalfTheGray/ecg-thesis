@@ -11,6 +11,22 @@ import os
 import numpy as np
 from matplotlib.colors import ListedColormap
 
+def create_output_directory(database, model):
+    """
+    Creates an output directory based on the database and model.
+    
+    Parameters:
+    - database: str, the name of the database (e.g., 'mitbih')
+    - model: str, the name of the model architecture (e.g., 'resnet18')
+    
+    Returns:
+    - str, the path to the created output directory
+    """
+    output_dir = f'output_plots_{database}_{model}'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    return output_dir
+
 def print_stats(predictions, labels):
     """
     Prints the performance statistics.
@@ -71,3 +87,39 @@ def showConfusionMatrix(predictions, labels, filename, output_dir, class_labels)
     
     plt.savefig(os.path.join(output_dir, filename), dpi=300, bbox_inches='tight')
     plt.close()
+
+def plot_training_history(history, output_dir):
+    """
+    Plots the training and validation loss and accuracy.
+
+    Parameters:
+    - history: History object from model.fit()
+    - output_dir: str, the directory to save the plots
+    """
+    # Plot training & validation loss
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    # Plot training & validation accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Train Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'training_history.png'))
+    plt.close()
+
+# Example usage:
+# output_dir = create_output_directory('mitbih', 'resnet18')
+# showConfusionMatrix(predictions, labels, 'confusion_matrix.png', output_dir, class_labels)
+# plot_training_history(history, output_dir)

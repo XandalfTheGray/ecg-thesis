@@ -2,8 +2,6 @@
 
 import wfdb
 import numpy as np
-import scipy.signal
-from sklearn.preprocessing import MinMaxScaler
 import os
 
 class ECG_reading:
