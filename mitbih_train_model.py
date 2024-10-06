@@ -10,6 +10,7 @@ from tensorflow import keras
 from datetime import datetime
 from collections import Counter
 from tensorflow.keras import mixed_precision
+import tensorflow as tf
 
 # Import models and evaluation
 from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d, build_transformer
@@ -166,51 +167,38 @@ def main():
             l2_reg=model_params['l2_reg']
         )
     elif model_type == 'transformer':
-        # Enable mixed precision for transformer only
+        # Enable mixed precision
         policy = mixed_precision.Policy('mixed_float16')
         mixed_precision.set_global_policy(policy)
-        
-        # Cast input data to float16
-        X_train = X_train.astype('float16')
-        X_valid = X_valid.astype('float16')
-        X_test = X_test.astype('float16')
-        
+
+        # Build the model
         model = build_transformer(
             input_shape=(X_train.shape[1], X_train.shape[2]),
             num_classes=num_classes,
             activation='softmax',
             **model_params
         )
-    else:
-        raise ValueError("Invalid model type.")
 
-    # Compile
-    model.compile(
-        loss='categorical_crossentropy',
-        optimizer=keras.optimizers.Adam(1e-4),
-        metrics=['accuracy']
-    )
+        # Use a loss scaling optimizer
+        optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+        optimizer = mixed_precision.LossScaleOptimizer(optimizer)
 
-    # Callbacks
-    callbacks = [
-        keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
-        ),
-        keras.callbacks.EarlyStopping(
-            monitor='val_loss', patience=5, restore_best_weights=True, verbose=1
-        ),
-        keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, 'best_model.keras'),
-            monitor='val_loss', save_best_only=True, verbose=1
+        # Compile the model with the mixed precision optimizer
+        model.compile(
+            loss='categorical_crossentropy',
+            optimizer=optimizer,
+            metrics=['accuracy']
         )
-    ]
 
-    # Train with adjusted parameters for transformer
-    if model_type == 'transformer':
-        # Use a smaller batch size and more epochs for transformer
+        # Convert input data to float16
+        X_train = tf.cast(X_train, dtype=tf.float16)
+        X_valid = tf.cast(X_valid, dtype=tf.float16)
+        X_test = tf.cast(X_test, dtype=tf.float16)
+
+        # Train with adjusted parameters for transformer
         transformer_batch_size = 64  # Adjust this value based on your GPU memory
         transformer_epochs = 50  # Increase epochs to compensate for smaller batch size
-        
+
         history = model.fit(
             X_train, y_nn_train, 
             epochs=transformer_epochs, 
@@ -221,19 +209,12 @@ def main():
             class_weight=class_weight_dict
         )
     else:
-        # Original training code for other models
-        history = model.fit(
-            X_train, y_nn_train, 
-            epochs=30, 
-            validation_data=(X_valid, y_nn_valid),
-            batch_size=256, 
-            shuffle=True, 
-            callbacks=callbacks, 
-            class_weight=class_weight_dict
-        )
+        raise ValueError("Invalid model type.")
 
     # Evaluate
     def evaluate_model(dataset, y_true, name):
+        if model_type == 'transformer':
+            dataset = tf.cast(dataset, dtype=tf.float16)
         y_pred = np.argmax(model.predict(dataset), axis=1)
         print(f"\n{name} Performance")
         print_stats(y_pred, y_true)
