@@ -8,6 +8,8 @@ from sklearn.metrics import (accuracy_score,
                              confusion_matrix, 
                              f1_score)
 import os
+import numpy as np
+from matplotlib.colors import ListedColormap
 
 def print_stats(predictions, labels):
     """
@@ -24,7 +26,8 @@ def print_stats(predictions, labels):
 
 def showConfusionMatrix(predictions, labels, filename, output_dir, class_labels):
     """
-    Plots and saves the confusion matrix.
+    Plots and saves the confusion matrix with square cells, larger font, and no title.
+    Labels are displayed right-side up for both axes.
 
     Parameters:
     - predictions: array-like, predicted class labels.
@@ -33,19 +36,38 @@ def showConfusionMatrix(predictions, labels, filename, output_dir, class_labels)
     - output_dir: str, the directory to save the plot.
     - class_labels: list, the list of class labels to display on the axes.
     """
-    # Create Confusion Matrix
     cfm_data = confusion_matrix(labels, predictions)
-    plt.figure(figsize=(8, 6))
-    cf_matrix = sns.heatmap(cfm_data, annot=True, fmt='.0f', square=True,
-                            cmap='YlGnBu', linewidths=0.5, linecolor='k', cbar=False)
-
-    # Apply Axis Formatting
-    cf_matrix.set_xlabel("Predicted Classification")
-    cf_matrix.set_ylabel("Actual Classification")
-    cf_matrix.xaxis.set_ticklabels(class_labels)
-    cf_matrix.yaxis.set_ticklabels(class_labels)
-
-    # Save Confusion Matrix to file
+    
+    fig, ax = plt.subplots(figsize=(10, 10))  # Increased figure size for square shape
+    cmap = ListedColormap(['white'])
+    sns.heatmap(
+        cfm_data, 
+        annot=True, 
+        fmt='d', 
+        cmap=cmap, 
+        cbar=False,
+        linewidths=1, 
+        linecolor='black', 
+        xticklabels=class_labels,
+        yticklabels=class_labels, 
+        ax=ax,
+        annot_kws={"size": 16}  # Increased font size for cell values
+    )
+    
+    ax.set_ylabel('Actual Classification', fontsize=16)  # Increased font size
+    ax.set_xlabel('Predicted Classification', fontsize=16)  # Increased font size
+    
+    # Remove title
+    ax.set_title('')
+    
+    # Rotate x-axis labels to be right-side up and increase font size
+    plt.xticks(rotation=0, fontsize=14)
+    
+    # Rotate y-axis labels to be right-side up and increase font size
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=14)
+    
+    # Adjust layout to prevent cutting off labels
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, filename))
+    
+    plt.savefig(os.path.join(output_dir, filename), dpi=300, bbox_inches='tight')
     plt.close()

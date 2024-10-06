@@ -1,4 +1,4 @@
-# train_model.py
+# mitbih_train_model.py
 
 import os
 import numpy as np
