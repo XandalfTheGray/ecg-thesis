@@ -1,10 +1,13 @@
 # models.py
-from tensorflow import keras
-from tensorflow.keras import layers, models
-from tensorflow.keras.regularizers import l2
-import tensorflow as tf
+from keras import layers, models
+from keras.regularizers import l2
+from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization, MultiHeadAttention, LayerNormalization, Dense
 
 # models.py
+
+from keras import layers, models
+from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense
+from keras.regularizers import l2
 
 def build_cnn(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
@@ -263,44 +266,31 @@ def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     return model
 
 def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0):
-    # Cast inputs to float16
-    inputs = tf.cast(inputs, dtype=tf.float16)
-    x = inputs
-    # Normalization and Attention
-    x = layers.LayerNormalization(epsilon=1e-6)(x)
-    x = layers.MultiHeadAttention(
+    # Multi-Head Attention
+    x = LayerNormalization(epsilon=1e-6)(inputs)
+    x = MultiHeadAttention(
         key_dim=head_size, num_heads=num_heads, dropout=dropout
     )(x, x)
-    x = layers.Dropout(dropout)(x)
-    res = x + inputs  # Now both x and inputs are float16
-    # Feed Forward Part
-    x = layers.LayerNormalization(epsilon=1e-6)(res)
-    x = layers.Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
-    x = layers.Dropout(dropout)(x)
-    x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
+    x = Dropout(dropout)(x)
+    res = x + inputs
+
+    # Feed Forward
+    x = LayerNormalization(epsilon=1e-6)(res)
+    x = Dense(ff_dim, activation="relu")(x)
+    x = Dropout(dropout)(x)
+    x = Dense(inputs.shape[-1])(x)
     return x + res
 
-def build_transformer(
-    input_shape,
-    head_size,
-    num_heads,
-    ff_dim,
-    num_transformer_blocks,
-    mlp_units,
-    dropout=0,
-    mlp_dropout=0,
-    num_classes=5,
-    activation='softmax'
-):
-    inputs = keras.Input(shape=input_shape)
-    x = tf.cast(inputs, dtype=tf.float16)  # Cast inputs to float16
+def build_transformer(input_shape, num_classes, head_size, num_heads, ff_dim, num_transformer_blocks, mlp_units, dropout=0, mlp_dropout=0, activation='softmax', **kwargs):
+    # The **kwargs allows the function to accept additional arguments without error
+    inputs = Input(shape=input_shape)
+    x = inputs
     for _ in range(num_transformer_blocks):
         x = transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
 
     x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
     for dim in mlp_units:
-        x = layers.Dense(dim, activation="relu")(x)
-        x = layers.Dropout(mlp_dropout)(x)
-    x = tf.cast(x, dtype=tf.float32)  # Cast back to float32 before final dense layer
-    outputs = layers.Dense(num_classes, activation=activation)(x)
-    return keras.Model(inputs, outputs)
+        x = Dense(dim, activation="relu")(x)
+        x = Dropout(mlp_dropout)(x)
+    outputs = Dense(num_classes, activation=activation)(x)
+    return models.Model(inputs, outputs)
