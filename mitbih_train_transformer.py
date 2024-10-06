@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.utils import class_weight
 from tensorflow import keras
-from tensorflow.keras import mixed_precision
 import tensorflow as tf
 
 # Import models and evaluation
@@ -60,9 +59,10 @@ def main():
     )
     class_weight_dict = dict(enumerate(class_weights))
 
-    # Enable mixed precision
-    policy = mixed_precision.Policy('mixed_float16')
-    mixed_precision.set_global_policy(policy)
+    # Ensure all input data is float32
+    X_train = tf.cast(X_train, dtype=tf.float32)
+    X_valid = tf.cast(X_valid, dtype=tf.float32)
+    X_test = tf.cast(X_test, dtype=tf.float32)
 
     # Build the model
     model = build_transformer(
@@ -72,21 +72,15 @@ def main():
         **model_params
     )
 
-    # Use a loss scaling optimizer
+    # Use a standard optimizer without mixed precision
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-    optimizer = mixed_precision.LossScaleOptimizer(optimizer)
 
-    # Compile the model with the mixed precision optimizer
+    # Compile the model
     model.compile(
         loss='categorical_crossentropy',
         optimizer=optimizer,
         metrics=['accuracy']
     )
-
-    # Convert input data to float16
-    X_train = tf.cast(X_train, dtype=tf.float16)
-    X_valid = tf.cast(X_valid, dtype=tf.float16)
-    X_test = tf.cast(X_test, dtype=tf.float16)
 
     # Train with adjusted parameters for transformer
     transformer_batch_size = 64  # Adjust this value based on your GPU memory
@@ -107,8 +101,6 @@ def main():
 
     # Evaluate
     def evaluate_model(dataset, y_true, name):
-        if model_type == 'transformer':
-            dataset = tf.cast(dataset, dtype=tf.float16)
         y_pred = np.argmax(model.predict(dataset), axis=1)
         print(f"\n{name} Performance")
         print_stats(y_pred, y_true)
