@@ -185,3 +185,6 @@ text_files.py
 create_ms_word_appendix.py
 code_appendix.html
 check_gpu_env.py
+
+# random scripts
+metronome_with_notes.py

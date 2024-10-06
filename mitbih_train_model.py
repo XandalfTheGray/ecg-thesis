@@ -9,9 +9,10 @@ from sklearn.utils import class_weight
 from tensorflow import keras
 from datetime import datetime
 from collections import Counter
+from tensorflow.keras import mixed_precision
 
 # Import models and evaluation
-from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
+from models import build_cnn, build_resnet18_1d, build_resnet34_1d, build_resnet50_1d, build_transformer
 from evaluation import print_stats, showConfusionMatrix
 
 # Import data preprocessing functions
@@ -21,21 +22,38 @@ def main():
     # Setup
     base_output_dir = 'output_plots'
     dataset_name = 'mitbih'
-    model_type = 'cnn' # 'cnn', 'resnet18', 'resnet34', 'resnet50'
+    model_type = 'transformer' # 'cnn', 'resnet18', 'resnet34', 'resnet50', 'transformer'
 
-    # Create a unique directory name with dataset, model, and datetime
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{current_time}")
+    # Create a unique directory name with dataset and model
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}")
     os.makedirs(output_dir, exist_ok=True)
     
     # Select Model & Parameters
-    model_params = {
-        'l2_reg': 0.001,
-        'filters': (32, 64, 128),
-        'kernel_sizes': (3, 3, 3),
-        'dropout_rates': (0.1, 0.1, 0.1, 0.5)
-    }
-    
+    if model_type == 'cnn':
+        model_params = {
+            'l2_reg': 0.0001,
+            'filters': (32, 64, 128),
+            'kernel_sizes': (3, 3, 3),
+            'dropout_rates': (0.1, 0.1, 0.1, 0.1)
+        }
+    elif model_type == 'transformer':
+        model_params = {
+            'head_size': 256,
+            'num_heads': 4,
+            'ff_dim': 4,
+            'num_transformer_blocks': 4,
+            'mlp_units': [128],
+            'mlp_dropout': 0.4,
+            'dropout': 0.25,
+        }
+    else: #elif model_type == 'resnet18':
+        model_params = {
+            'l2_reg': 0.001,
+            'filters': (32, 64, 128),
+            'kernel_sizes': (3, 3, 3),
+            'dropout_rates': (0.1, 0.1, 0.1, 0.3)
+        }
+
     # Define data entries and labels
     data_entries = ['100', '101', '103', '105', '106', '107', '108', '109', '111', '112', '113',
                     '114', '115', '116', '117', '118', '119', '121', '122', '123', '124', '200', '201', '202',
@@ -147,6 +165,22 @@ def main():
             num_classes=num_classes,
             l2_reg=model_params['l2_reg']
         )
+    elif model_type == 'transformer':
+        # Enable mixed precision for transformer only
+        policy = mixed_precision.Policy('mixed_float16')
+        mixed_precision.set_global_policy(policy)
+        
+        # Cast input data to float16
+        X_train = X_train.astype('float16')
+        X_valid = X_valid.astype('float16')
+        X_test = X_test.astype('float16')
+        
+        model = build_transformer(
+            input_shape=(X_train.shape[1], X_train.shape[2]),
+            num_classes=num_classes,
+            activation='softmax',
+            **model_params
+        )
     else:
         raise ValueError("Invalid model type.")
 
@@ -171,16 +205,32 @@ def main():
         )
     ]
 
-    # Train
-    history = model.fit(
-        X_train, y_nn_train, 
-        epochs=30, 
-        validation_data=(X_valid, y_nn_valid),
-        batch_size=256, 
-        shuffle=True, 
-        callbacks=callbacks, 
-        class_weight=class_weight_dict
-    )
+    # Train with adjusted parameters for transformer
+    if model_type == 'transformer':
+        # Use a smaller batch size and more epochs for transformer
+        transformer_batch_size = 64  # Adjust this value based on your GPU memory
+        transformer_epochs = 50  # Increase epochs to compensate for smaller batch size
+        
+        history = model.fit(
+            X_train, y_nn_train, 
+            epochs=transformer_epochs, 
+            validation_data=(X_valid, y_nn_valid),
+            batch_size=transformer_batch_size, 
+            shuffle=True, 
+            callbacks=callbacks, 
+            class_weight=class_weight_dict
+        )
+    else:
+        # Original training code for other models
+        history = model.fit(
+            X_train, y_nn_train, 
+            epochs=30, 
+            validation_data=(X_valid, y_nn_valid),
+            batch_size=256, 
+            shuffle=True, 
+            callbacks=callbacks, 
+            class_weight=class_weight_dict
+        )
 
     # Evaluate
     def evaluate_model(dataset, y_true, name):

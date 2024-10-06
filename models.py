@@ -1,43 +1,66 @@
 # models.py
-from keras import layers, models
-from keras.regularizers import l2
-from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization, MultiHeadAttention, LayerNormalization, Dense
+from tensorflow import keras
+from tensorflow.keras import layers, models
+from tensorflow.keras.regularizers import l2
+import tensorflow as tf
+
+# models.py
 
 def build_cnn(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
     Builds a Convolutional Neural Network (CNN) with two Conv1D layers per block and MaxPooling.
     """
+    
+    # Retrieve parameters from kwargs or use defaults
     filters = kwargs.get('filters', [32, 64, 128])
-    kernel_sizes = kwargs.get('kernel_sizes', [5, 5, 5])
-    dropout_rates = kwargs.get('dropout_rates', [0.3, 0.3, 0.3, 0.3])
-
+    kernel_sizes = kwargs.get('kernel_sizes', [3, 3, 3])
+    dropout_rates = kwargs.get('dropout_rates', [0.1, 0.1, 0.1, 0.5])
+    
+    # Input Layer
     inputs = Input(shape=input_shape)
     x = inputs
-    for i in range(len(filters)):
-        # First Conv1D layer
-        x = Conv1D(filters=filters[i],
-                   kernel_size=kernel_sizes[i],
-                   activation='relu',
-                   padding='same',
-                   kernel_regularizer=l2(l2_reg))(x)
-        # Second Conv1D layer
-        x = Conv1D(filters=filters[i],
-                   kernel_size=kernel_sizes[i],
-                   activation='relu',
-                   padding='same',
-                   kernel_regularizer=l2(l2_reg))(x)
-        # MaxPooling
-        pool_size = 3 if filters[i] == 32 else 2 if filters[i] == 64 else 5
-        x = MaxPooling1D(pool_size=pool_size)(x)
-        # Dropout
-        x = Dropout(dropout_rates[i])(x)
     
+    # Iterate through each Conv1D block
+    for i in range(len(filters)):
+        # First Conv1D layer in the block
+        x = Conv1D(filters=filters[i],
+                   kernel_size=kernel_sizes[i],
+                   activation='relu',
+                   padding='same',
+                   kernel_regularizer=l2(l2_reg))(x)
+        
+        # Second Conv1D layer in the block
+        x = Conv1D(filters=filters[i],
+                   kernel_size=kernel_sizes[i],
+                   activation='relu',
+                   padding='same',
+                   kernel_regularizer=l2(l2_reg))(x)
+        
+        # Determine pool_size based on the number of filters
+        if filters[i] == 32:
+            pool_size = 3
+        elif filters[i] == 64:
+            pool_size = 2
+        else:
+            pool_size = 5
+        
+        # MaxPooling and Dropout
+        x = MaxPooling1D(pool_size=pool_size)(x)
+        x = Dropout(rate=dropout_rates[i])(x)
+    
+    # Flatten the output from convolutional layers
     x = Flatten()(x)
+    
+    # Dense Layer with Dropout
     x = Dense(64, activation='relu', kernel_regularizer=l2(l2_reg))(x)
-    x = Dropout(dropout_rates[-1])(x)
+    x = Dropout(rate=dropout_rates[-1])(x)
+    
+    # Output Layer
     outputs = Dense(num_classes, activation=activation)(x)
     
+    # Create the model
     model = models.Model(inputs, outputs)
+    
     return model
 
 def conv_block(x, filters, kernel_size=3, stride=1, l2_reg=0.001):
@@ -240,31 +263,44 @@ def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     return model
 
 def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0):
-    # Multi-Head Attention
-    x = LayerNormalization(epsilon=1e-6)(inputs)
-    x = MultiHeadAttention(
+    # Cast inputs to float16
+    inputs = tf.cast(inputs, dtype=tf.float16)
+    x = inputs
+    # Normalization and Attention
+    x = layers.LayerNormalization(epsilon=1e-6)(x)
+    x = layers.MultiHeadAttention(
         key_dim=head_size, num_heads=num_heads, dropout=dropout
     )(x, x)
-    x = Dropout(dropout)(x)
-    res = x + inputs
-
-    # Feed Forward
-    x = LayerNormalization(epsilon=1e-6)(res)
-    x = Dense(ff_dim, activation="relu")(x)
-    x = Dropout(dropout)(x)
-    x = Dense(inputs.shape[-1])(x)
+    x = layers.Dropout(dropout)(x)
+    res = x + inputs  # Now both x and inputs are float16
+    # Feed Forward Part
+    x = layers.LayerNormalization(epsilon=1e-6)(res)
+    x = layers.Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
+    x = layers.Dropout(dropout)(x)
+    x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
     return x + res
 
-def build_transformer(input_shape, num_classes, head_size, num_heads, ff_dim, num_transformer_blocks, mlp_units, dropout=0, mlp_dropout=0, activation='softmax', **kwargs):
-    # The **kwargs allows the function to accept additional arguments without error
-    inputs = Input(shape=input_shape)
-    x = inputs
+def build_transformer(
+    input_shape,
+    head_size,
+    num_heads,
+    ff_dim,
+    num_transformer_blocks,
+    mlp_units,
+    dropout=0,
+    mlp_dropout=0,
+    num_classes=5,
+    activation='softmax'
+):
+    inputs = keras.Input(shape=input_shape)
+    x = tf.cast(inputs, dtype=tf.float16)  # Cast inputs to float16
     for _ in range(num_transformer_blocks):
         x = transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
 
     x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
     for dim in mlp_units:
-        x = Dense(dim, activation="relu")(x)
-        x = Dropout(mlp_dropout)(x)
-    outputs = Dense(num_classes, activation=activation)(x)
-    return models.Model(inputs, outputs)
+        x = layers.Dense(dim, activation="relu")(x)
+        x = layers.Dropout(mlp_dropout)(x)
+    x = tf.cast(x, dtype=tf.float32)  # Cast back to float32 before final dense layer
+    outputs = layers.Dense(num_classes, activation=activation)(x)
+    return keras.Model(inputs, outputs)

@@ -78,8 +78,7 @@ def main(time_steps, batch_size, model_type):
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csn_ecg'
 
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch_{current_time}")
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
     
     learning_rate = 1e-3
