@@ -41,7 +41,7 @@ def main(time_steps, batch_size, resnet_type):
     sys.path.append(base_path)
     models = import_module('models')
     evaluation = import_module('evaluation')
-    csn_ecg_data_preprocessing = import_module('csn_ecg_data_preprocessing')
+    csnecg_data_preprocessing = import_module('csnecg_data_preprocessing')
 
     # Import specific functions from modules
     build_resnet18_1d = models.build_resnet18_1d
@@ -49,11 +49,11 @@ def main(time_steps, batch_size, resnet_type):
     build_resnet50_1d = models.build_resnet50_1d
     print_stats = evaluation.print_stats
     showConfusionMatrix = evaluation.showConfusionMatrix
-    prepare_csn_ecg_data = csn_ecg_data_preprocessing.prepare_csn_ecg_data
+    prepare_csnecg_data = csnecg_data_preprocessing.prepare_csnecg_data
 
     # Set up output directories
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
-    dataset_name = 'csn_ecg'
+    dataset_name = 'csnecg'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{resnet_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
     
@@ -65,7 +65,7 @@ def main(time_steps, batch_size, resnet_type):
     }
 
     # Prepare data
-    train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csn_ecg_data(time_steps, base_path, batch_size)
+    train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csnecg_data(time_steps, base_path, batch_size)
 
     # Build the ResNet model based on the specified type
     if resnet_type == 'resnet18':
