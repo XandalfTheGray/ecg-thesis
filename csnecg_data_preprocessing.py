@@ -9,7 +9,12 @@ import wfdb
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MultiLabelBinarizer
+from collections import Counter
+import tensorflow as tf
 
+# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_snomed_ct_mapping(csv_path, class_mapping):
@@ -24,6 +29,7 @@ def load_snomed_ct_mapping(csv_path, class_mapping):
         for condition in conditions:
             condition_to_class[condition.lower()] = class_name
     
+    # Create the final mapping from SNOMED-CT codes to class names
     mapping = {}
     for _, row in df.iterrows():
         snomed_ct_code = str(row['Snomed_CT'])
@@ -100,6 +106,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
         logging.info(f"Starting to process data for {desired_length} time steps. Max records: {max_records}")
         logging.info(f"Number of data entries: {len(data_entries)}")
         
+        # Randomly sample records if max_records is specified
         if max_records is not None:
             random.seed(42)
             data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
@@ -114,6 +121,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                 continue
         
             try:
+                # Load ECG data from .mat file
                 mat_data = loadmat(mat_file)
                 if 'val' not in mat_data:
                     logging.warning(f"'val' key not found in mat file for record {record}")
@@ -126,7 +134,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                     skipped_records += 1
                     continue
         
-                # Attempt to read the header; handle date parsing errors
+                # Read the header file
                 try:
                     record_header = wfdb.rdheader(os.path.join(database_path, record))
                 except ValueError as ve:
@@ -138,6 +146,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                     skipped_records += 1
                     continue
         
+                # Extract SNOMED-CT codes from the header
                 snomed_ct_codes = extract_snomed_ct_codes(record_header)
         
                 if not snomed_ct_codes:
@@ -145,6 +154,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                     logging.warning(f"No SNOMED-CT codes found for record {record}")
                     continue
         
+                # Map SNOMED-CT codes to class names
                 valid_classes = []
                 for code in snomed_ct_codes:
                     if code in snomed_ct_mapping:
@@ -160,11 +170,12 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
                 if len(valid_classes) > 1 and 'Other' in valid_classes:
                     valid_classes.remove('Other')
         
+                # Pad or truncate ECG data to desired length
                 ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
                 X.append(ecg_padded)
                 Y_cl.append(valid_classes)
         
-                # Plot ECG signals per class
+                # Plot ECG signals for each class (up to num_plots_per_class)
                 for cls in valid_classes:
                     if cls not in plotted_classes and list(Y_cl).count(cls) <= num_plots_per_class:
                         plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
@@ -192,7 +203,7 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
             logging.error("No data was processed successfully")
             continue
         
-        # Convert lists to numpy arrays with dtype=object for Y_cl
+        # Convert lists to numpy arrays
         X = np.array(X)
         Y_cl = np.array(Y_cl, dtype=object)
         
@@ -203,11 +214,109 @@ def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, 
         np.save(os.path.join(preprocessed_data_dir, 'Y.npy'), Y_cl)
         logging.info(f"Saved preprocessed data to '{preprocessed_data_dir}' directory")
 
+def load_preprocessed_data(time_steps, base_path):
+    """
+    Load preprocessed data from disk.
+    """
+    data_dir = os.path.join(base_path, 'csnecg_preprocessed_data', f'{time_steps}_signal_time_steps')
+    X = np.load(os.path.join(data_dir, 'X.npy'))
+    Y_cl = np.load(os.path.join(data_dir, 'Y.npy'), allow_pickle=True)
+    return X, Y_cl
+
+def prepare_labels(Y_cl):
+    """
+    Prepare labels for multi-label classification.
+    """
+    unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
+    mlb = MultiLabelBinarizer(classes=sorted(unique_classes))
+    Y_binarized = mlb.fit_transform(Y_cl)
+    label_names = mlb.classes_
+    Num2Label = {idx: label for idx, label in enumerate(label_names)}
+    label2Num = {label: idx for idx, label in enumerate(label_names)}
+    num_classes = len(label_names)
+    return Y_binarized, label_names, Num2Label, label2Num, num_classes
+
+def filter_data(X, Y_binarized):
+    """
+    Remove samples with no positive labels.
+    """
+    valid_samples = Y_binarized.sum(axis=1) > 0
+    X = X[valid_samples]
+    Y_binarized = Y_binarized[valid_samples]
+    return X, Y_binarized
+
+def remove_rare_combinations(X, Y_binarized, min_combination_count=2):
+    """
+    Remove samples with rare label combinations.
+    """
+    label_combinations = [tuple(row) for row in Y_binarized]
+    combination_counts = Counter(label_combinations)
+    valid_combinations = [comb for comb, count in combination_counts.items() if count >= min_combination_count]
+    valid_indices = [i for i, comb in enumerate(label_combinations) if comb in valid_combinations]
+    X = X[valid_indices]
+    Y_binarized = Y_binarized[valid_indices]
+    return X, Y_binarized
+
+def split_and_scale_data(X, Y_binarized, test_size=0.2, val_size=0.25):
+    """
+    Split the data into train, validation, and test sets, and scale the features.
+    """
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, Y_binarized, test_size=test_size, random_state=42
+    )
+    X_train, X_valid, y_train, y_valid = train_test_split(
+        X_train, y_train, test_size=val_size, random_state=42
+    )
+
+    scaler = StandardScaler()
+    X_train_scaled = scale_dataset(X_train, scaler)
+    X_valid_scaled = scale_dataset(X_valid, scaler)
+    X_test_scaled = scale_dataset(X_test, scaler)
+
+    return X_train_scaled, X_valid_scaled, X_test_scaled, y_train, y_valid, y_test
+
+def scale_dataset(X, scaler):
+    """
+    Scale the dataset using StandardScaler.
+    """
+    num_samples, num_timesteps, num_channels = X.shape
+    X_reshaped = X.reshape(-1, num_channels)
+    X_scaled = scaler.fit_transform(X_reshaped)
+    return X_scaled.reshape(num_samples, num_timesteps, num_channels)
+
+def create_tf_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
+    """
+    Create a TensorFlow dataset from numpy arrays.
+    """
+    dataset = tf.data.Dataset.from_tensor_slices((X, y))
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=len(X))
+    dataset = dataset.batch(batch_size)
+    if prefetch:
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
+
+def prepare_csn_ecg_data(time_steps, base_path, batch_size):
+    """
+    Prepare CSN ECG data for model training.
+    """
+    X, Y_cl = load_preprocessed_data(time_steps, base_path)
+    Y_binarized, label_names, Num2Label, label2Num, num_classes = prepare_labels(Y_cl)
+    X, Y_binarized = filter_data(X, Y_binarized)
+    X, Y_binarized = remove_rare_combinations(X, Y_binarized)
+    X_train, X_valid, X_test, y_train, y_valid, y_test = split_and_scale_data(X, Y_binarized)
+
+    train_dataset = create_tf_dataset(X_train, y_train, batch_size=batch_size)
+    valid_dataset = create_tf_dataset(X_valid, y_valid, batch_size=batch_size, shuffle=False)
+    test_dataset = create_tf_dataset(X_test, y_test, batch_size=batch_size, shuffle=False)
+
+    return train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label
+
 def main():
     """
     Main function to preprocess the CSN ECG dataset and save processed data to disk.
     """
-    # Paths
+    # Define paths
     database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                  'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                                  'WFDBRecords')
