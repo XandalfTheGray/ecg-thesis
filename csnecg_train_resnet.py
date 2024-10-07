@@ -60,7 +60,7 @@ def main(time_steps, batch_size, resnet_type):
         raise ValueError("Invalid ResNet type.")
 
     # Define optimizer with SGD and momentum
-    optimizer = SGD(learning_rate=1e-4, momentum=0.9) # LR of 1e-4 for ResNet50 case
+    optimizer = SGD(learning_rate=1e-3, momentum=0.9)
 
     # Compile the model
     model.compile(
