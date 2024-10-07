@@ -217,8 +217,8 @@ def plot_confusion_matrix_overall(y_true, y_pred, label_names, output_dir):
     """
     Plots and saves an overall confusion matrix aggregated across all classes.
     """
-    # Aggregate confusion matrices for all classes
-    cm_total = np.zeros((2,2))
+    # Initialize cm_total as an integer array to prevent float accumulation
+    cm_total = np.zeros((2, 2), dtype=int)
     for idx in range(y_true.shape[1]):
         cm = confusion_matrix(y_true[:, idx], y_pred[:, idx])
         cm_total += cm
