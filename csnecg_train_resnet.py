@@ -60,7 +60,8 @@ def main(time_steps, batch_size, resnet_type):
         raise ValueError("Invalid ResNet type.")
 
     # Define optimizer with SGD and momentum
-    optimizer = SGD(learning_rate=1e-3, momentum=0.9)
+    # optimizer = SGD(learning_rate=1e-3, momentum=0.9)
+    optimizer = tf.keras.optimizers.Adam(1e-3)
 
     # Compile the model
     model.compile(
