@@ -312,9 +312,19 @@ def transformer_encoder_tf(inputs, head_size, num_heads, ff_dim, dropout=0):
     x = Dense(inputs.shape[-1])(x)
     return x + res
 
-def build_transformer_tf(input_shape, num_classes, head_size, num_heads, ff_dim, num_transformer_blocks, mlp_units, dropout=0, mlp_dropout=0, activation='softmax', **kwargs):
+def build_transformer_tf(input_shape, num_classes, **kwargs):
     inputs = Input(shape=input_shape)
     x = inputs
+    
+    num_transformer_blocks = kwargs.get('num_transformer_blocks', 4)
+    head_size = kwargs.get('head_size', 256)
+    num_heads = kwargs.get('num_heads', 4)
+    ff_dim = kwargs.get('ff_dim', 4)
+    dropout = kwargs.get('dropout', 0)
+    mlp_units = kwargs.get('mlp_units', [128])
+    mlp_dropout = kwargs.get('mlp_dropout', 0)
+    activation = kwargs.get('activation', 'softmax')
+
     for _ in range(num_transformer_blocks):
         x = transformer_encoder_tf(x, head_size, num_heads, ff_dim, dropout)
 

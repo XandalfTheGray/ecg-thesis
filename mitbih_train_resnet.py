@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.utils import class_weight
 from tensorflow import keras
+from keras.optimizers import SGD
 
 # Update this import
 from evaluation import print_stats, showConfusionMatrix, CustomProgressBar
@@ -74,23 +75,26 @@ def main():
             l2_reg=model_params['l2_reg']
         )
 
+    # Define optimizer with SGD and momentum
+    optimizer = SGD(learning_rate=1e-3, momentum=0.9) # LR of 1e-4 for ResNet50 case
+
     # Compile model
     model.compile(
         loss='categorical_crossentropy',
-        optimizer='adam',
+        optimizer=optimizer,
         metrics=['accuracy']
     )
 
     # Train model
     history = model.fit(
         X_train, y_nn_train,
-        epochs=50,
-        batch_size=32,
+        epochs=50, # 30 for ResNet50 case
+        batch_size=256, # 128 for ResNet50 case
         validation_data=(X_valid, y_nn_valid),
         class_weight=class_weight_dict,
         callbacks=[
             CustomProgressBar(),
-            keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
+            keras.callbacks.EarlyStopping(patience=15, restore_best_weights=True),
             keras.callbacks.ReduceLROnPlateau(factor=0.1, patience=5)
         ],
         verbose=0

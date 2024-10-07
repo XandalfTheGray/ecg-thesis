@@ -73,7 +73,7 @@ def main():
     history = model.fit(
         X_train, y_nn_train,
         epochs=50,
-        batch_size=32,
+        batch_size=256,
         validation_data=(X_valid, y_nn_valid),
         class_weight=class_weight_dict,
         callbacks=[
