@@ -25,7 +25,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ==============================
-# Existing Functions
+# Multiclass Evaluation and Plotting Functions
 # ==============================
 
 def print_stats(y_pred, y_true):
@@ -71,7 +71,7 @@ class CustomProgressBar(keras.callbacks.Callback):
         print(f"Epoch {epoch + 1}: Loss = {logs.get('loss'):.4f}, Accuracy = {logs.get('accuracy'):.4f}")
 
 # ==============================
-# New Evaluation and Plotting Functions
+# Multilabel Evaluation and Plotting Functions
 # ==============================
 
 def compute_metrics(y_true, y_pred, y_scores):
