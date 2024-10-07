@@ -21,7 +21,7 @@ sys.path.append('/content/ecg-thesis')
 
 # Import your modules
 from models import build_transformer
-from evaluation import print_stats, showConfusionMatrix
+from evaluation import print_stats, showConfusionMatrix, compute_and_save_multilabel_metrics
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
@@ -94,6 +94,9 @@ def main(time_steps, batch_size):
 
     print("\nClassification Report:")
     print(classification_report(y_true, y_pred_classes, target_names=label_names))
+
+    # Compute and save additional metrics
+    compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_names, output_dir)
 
     plot_confusion_matrices(y_true, y_pred_classes, label_names, output_dir)
     plot_training_history(history, output_dir)

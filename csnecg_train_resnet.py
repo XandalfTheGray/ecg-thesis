@@ -16,7 +16,7 @@ sys.path.append('/content/ecg-thesis')
 
 # Import your modules
 from models import build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
-from evaluation import print_stats, showConfusionMatrix
+from evaluation import print_stats, showConfusionMatrix, compute_and_save_multilabel_metrics
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size, resnet_type):
@@ -104,6 +104,9 @@ def main(time_steps, batch_size, resnet_type):
 
     print("\nClassification Report:")
     print(classification_report(y_true, y_pred_classes, target_names=label_names))
+
+    # Compute and save additional metrics
+    compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_names, output_dir)
 
     # Plot confusion matrices and training history
     plot_confusion_matrices(y_true, y_pred_classes, label_names, output_dir)
