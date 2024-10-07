@@ -2,11 +2,17 @@
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import (accuracy_score, 
-                             precision_score, 
-                             recall_score,
-                             confusion_matrix, 
-                             f1_score)
+from sklearn.metrics import (
+    accuracy_score, 
+    precision_score, 
+    recall_score,
+    f1_score,
+    hamming_loss,
+    jaccard_score,
+    roc_auc_score,
+    coverage_error,
+    confusion_matrix
+)
 import os
 import numpy as np
 from matplotlib.colors import ListedColormap
@@ -139,7 +145,74 @@ def plot_training_history(history, output_dir):
     plt.savefig(os.path.join(output_dir, 'training_history.png'))
     plt.close()
 
-# Example usage:
-# output_dir = create_output_directory('mitbih', 'resnet18')
-# showConfusionMatrix(predictions, labels, 'confusion_matrix.png', output_dir, class_labels)
-# plot_training_history(history, output_dir)
+def compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_names, output_dir):
+    """
+    Computes multilabel classification metrics, prints them, and saves to a text file.
+    
+    Parameters:
+    - y_true (numpy.ndarray): True binary labels.
+    - y_pred_classes (numpy.ndarray): Predicted binary labels.
+    - y_pred (numpy.ndarray): Predicted probabilities.
+    - label_names (list): List of label names.
+    - output_dir (str): Directory to save the metrics file.
+    """
+    # Calculate Metrics
+    h_loss = hamming_loss(y_true, y_pred_classes)
+    exact_match = np.all(y_true == y_pred_classes, axis=1).mean()
+    precision_micro = precision_score(y_true, y_pred_classes, average='micro', zero_division=0)
+    precision_macro = precision_score(y_true, y_pred_classes, average='macro', zero_division=0)
+    precision_weighted = precision_score(y_true, y_pred_classes, average='weighted', zero_division=0)
+    
+    recall_micro = recall_score(y_true, y_pred_classes, average='micro', zero_division=0)
+    recall_macro = recall_score(y_true, y_pred_classes, average='macro', zero_division=0)
+    recall_weighted = recall_score(y_true, y_pred_classes, average='weighted', zero_division=0)
+    
+    f1_micro = f1_score(y_true, y_pred_classes, average='micro', zero_division=0)
+    f1_macro = f1_score(y_true, y_pred_classes, average='macro', zero_division=0)
+    f1_weighted = f1_score(y_true, y_pred_classes, average='weighted', zero_division=0)
+    
+    jaccard = jaccard_score(y_true, y_pred_classes, average='macro', zero_division=0)
+    
+    # Handle AUC-ROC for multilabel
+    try:
+        auc_roc = roc_auc_score(y_true, y_pred, average='macro')
+    except ValueError:
+        auc_roc = float('nan')  # Handle cases where AUC cannot be computed
+    
+    coverage = coverage_error(y_true, y_pred)
+    
+    # Print Metrics
+    print("\nAdditional Metrics:")
+    print(f"Hamming Loss: {h_loss:.4f}")
+    print(f"Exact Match Ratio: {exact_match:.4f}")
+    print(f"Precision (Micro): {precision_micro:.4f}")
+    print(f"Precision (Macro): {precision_macro:.4f}")
+    print(f"Precision (Weighted): {precision_weighted:.4f}")
+    print(f"Recall (Micro): {recall_micro:.4f}")
+    print(f"Recall (Macro): {recall_macro:.4f}")
+    print(f"Recall (Weighted): {recall_weighted:.4f}")
+    print(f"F1-Score (Micro): {f1_micro:.4f}")
+    print(f"F1-Score (Macro): {f1_macro:.4f}")
+    print(f"F1-Score (Weighted): {f1_weighted:.4f}")
+    print(f"Jaccard Index (Macro): {jaccard:.4f}")
+    print(f"AUC-ROC (Macro): {auc_roc:.4f}")
+    print(f"Coverage Error: {coverage:.4f}")
+    
+    # Save Metrics to a File
+    metrics_path = os.path.join(output_dir, 'additional_metrics.txt')
+    with open(metrics_path, 'w') as f:
+        f.write("Additional Metrics:\n")
+        f.write(f"Hamming Loss: {h_loss:.4f}\n")
+        f.write(f"Exact Match Ratio: {exact_match:.4f}\n")
+        f.write(f"Precision (Micro): {precision_micro:.4f}\n")
+        f.write(f"Precision (Macro): {precision_macro:.4f}\n")
+        f.write(f"Precision (Weighted): {precision_weighted:.4f}\n")
+        f.write(f"Recall (Micro): {recall_micro:.4f}\n")
+        f.write(f"Recall (Macro): {recall_macro:.4f}\n")
+        f.write(f"Recall (Weighted): {recall_weighted:.4f}\n")
+        f.write(f"F1-Score (Micro): {f1_micro:.4f}\n")
+        f.write(f"F1-Score (Macro): {f1_macro:.4f}\n")
+        f.write(f"F1-Score (Weighted): {f1_weighted:.4f}\n")
+        f.write(f"Jaccard Index (Macro): {jaccard:.4f}\n")
+        f.write(f"AUC-ROC (Macro): {auc_roc:.4f}\n")
+        f.write(f"Coverage Error: {coverage:.4f}\n")
