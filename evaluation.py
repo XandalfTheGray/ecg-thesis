@@ -181,8 +181,8 @@ def compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_na
     
     coverage = coverage_error(y_true, y_pred)
     
-    # Generate classification report
-    class_report = classification_report(y_true, y_pred_classes, target_names=label_names)
+    # Generate classification report with zero_division parameter
+    class_report = classification_report(y_true, y_pred_classes, target_names=label_names, zero_division=0)
     
     # Save Metrics to a File
     metrics_path = os.path.join(output_dir, 'additional_metrics.txt')
