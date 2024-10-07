@@ -153,27 +153,66 @@ def plot_precision_recall_per_class(y_true, y_scores, label_names, output_dir):
         plt.savefig(os.path.join(output_dir, f'precision_recall_{label}.png'))
         plt.close()
 
+def plot_precision_recall_aggregated(y_true, y_scores, label_names, output_dir):
+    """
+    Plots and saves aggregated Precision-Recall curves for all classes on a single graph.
+    """
+    plt.figure(figsize=(8, 6))
+    for idx, label in enumerate(label_names):
+        precision, recall, _ = precision_recall_curve(y_true[:, idx], y_scores[:, idx])
+        average_precision = average_precision_score(y_true[:, idx], y_scores[:, idx])
+        plt.plot(recall, precision, label=f'{label} (AP={average_precision:.2f})')
+    
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Aggregated Precision-Recall Curves')
+    plt.legend(loc='lower left')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'aggregated_precision_recall.png'))
+    plt.close()
+
 def plot_roc_curve_per_class(y_true, y_scores, label_names, output_dir):
     """
     Plots and saves ROC curves for each class.
     """
     for idx, label in enumerate(label_names):
-        fpr, tpr, _ = roc_curve(y_true[:, idx], y_scores[:, idx])
         try:
+            fpr, tpr, _ = roc_curve(y_true[:, idx], y_scores[:, idx])
             roc_auc = roc_auc_score(y_true[:, idx], y_scores[:, idx])
+            plt.figure(figsize=(6, 5))
+            plt.plot(fpr, tpr, label=f'AUC={roc_auc:.2f}')
+            plt.plot([0, 1], [0, 1], 'k--')
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
+            plt.title(f'ROC Curve for {label}')
+            plt.legend(loc='lower right')
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, f'roc_curve_{label}.png'))
+            plt.close()
         except ValueError:
-            roc_auc = np.nan  # Handle cases where AUC cannot be computed
-        
-        plt.figure(figsize=(6, 5))
-        plt.plot(fpr, tpr, label=f'AUC={roc_auc:.2f}')
-        plt.plot([0, 1], [0, 1], 'k--')
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title(f'ROC Curve for {label}')
-        plt.legend(loc='lower right')
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f'roc_curve_{label}.png'))
-        plt.close()
+            logging.warning(f"ROC AUC score cannot be computed for class {label}. Skipping.")
+
+def plot_roc_curve_aggregated(y_true, y_scores, label_names, output_dir):
+    """
+    Plots and saves aggregated ROC curves for all classes on a single graph.
+    """
+    plt.figure(figsize=(8, 6))
+    for idx, label in enumerate(label_names):
+        try:
+            fpr, tpr, _ = roc_curve(y_true[:, idx], y_scores[:, idx])
+            roc_auc = roc_auc_score(y_true[:, idx], y_scores[:, idx])
+            plt.plot(fpr, tpr, label=f'{label} (AUC={roc_auc:.2f})')
+        except ValueError:
+            logging.warning(f"ROC AUC score cannot be computed for class {label}. Skipping.")
+    
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Aggregated ROC Curves')
+    plt.legend(loc='lower right')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'aggregated_roc_curves.png'))
+    plt.close()
 
 def plot_metrics_bar_chart(y_true, y_pred, label_names, output_dir):
     """
@@ -232,7 +271,30 @@ def plot_confusion_matrix_overall(y_true, y_pred, label_names, output_dir):
     plt.savefig(os.path.join(output_dir, 'overall_confusion_matrix.png'))
     plt.close()
 
-def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir):
+def plot_training_history(history, output_dir):
+    """Plot and save the training and validation loss and accuracy."""
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Train Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'training_history.png'))
+    plt.close()
+
+def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir, history=None):
     """
     Computes metrics, generates classification report, and creates evaluation plots.
 
@@ -242,6 +304,7 @@ def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir)
     - y_scores (np.ndarray): Predicted scores/probabilities.
     - label_names (list): List of class names.
     - output_dir (str): Directory to save evaluation results.
+    - history (keras.callbacks.History, optional): History object from model training.
 
     Returns:
     - metrics_dict (dict): Dictionary containing all computed metrics.
@@ -267,13 +330,23 @@ def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir)
         for metric, value in metrics_dict.items():
             f.write(f"{metric}: {value:.4f}\n")
     
-    # Generate plots
+    # Generate individual plots
     plot_confusion_matrix_per_class(y_true, y_pred, label_names, output_dir)
     plot_precision_recall_per_class(y_true, y_scores, label_names, output_dir)
     plot_roc_curve_per_class(y_true, y_scores, label_names, output_dir)
+    
+    # Generate aggregated plots
+    plot_precision_recall_aggregated(y_true, y_scores, label_names, output_dir)
+    plot_roc_curve_aggregated(y_true, y_scores, label_names, output_dir)
+    
+    # Generate additional visualizations
     plot_metrics_bar_chart(y_true, y_pred, label_names, output_dir)
     plot_label_distribution(y_true, label_names, output_dir)
     plot_confusion_matrix_overall(y_true, y_pred, label_names, output_dir)
+    
+    # Plot training history if history is provided
+    if history is not None:
+        plot_training_history(history, output_dir)
     
     logging.info(f"Evaluation metrics and plots saved in '{output_dir}'")
     

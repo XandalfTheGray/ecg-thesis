@@ -94,15 +94,16 @@ def main(time_steps, batch_size, resnet_type):
     # Generate predictions
     y_pred = model.predict(test_dataset)
     y_pred_classes = (y_pred > 0.5).astype(int)
-    y_true = np.concatenate([y for x, y in test_dataset], axis=0)
+    y_true = np.concatenate([y for x, y in test_dataset], axis=0).astype(int)
 
-    # Evaluate and visualize using the new evaluate_model function
+    # Evaluate and visualize using the centralized evaluate_multilabel_model function
     evaluate_multilabel_model(
         y_true=y_true,
         y_pred=y_pred_classes,
         y_scores=y_pred,
         label_names=label_names,
-        output_dir=output_dir
+        output_dir=output_dir,
+        history=history  # Pass the history object
     )
 
     print(f"\nTraining completed. Results saved in {output_dir}")
