@@ -8,7 +8,8 @@ from sklearn.metrics import classification_report
 import seaborn as sns
 import sys
 import tensorflow as tf
-from tensorflow.keras import mixed_precision
+from tensorflow import keras
+from keras import mixed_precision
 import argparse
 
 # Enable mixed precision for better performance on GPUs

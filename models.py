@@ -2,7 +2,7 @@
 from keras import layers, models
 from keras.regularizers import l2
 from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization, MultiHeadAttention, LayerNormalization, Dense
-from tensorflow.keras.layers import MultiHeadAttention, LayerNormalization, Dense, Dropout, GlobalAveragePooling1D
+from keras.layers import MultiHeadAttention, LayerNormalization, Dense, Dropout, GlobalAveragePooling1D
 
 # models.py
 
