@@ -11,7 +11,8 @@ from sklearn.metrics import (
     jaccard_score,
     roc_auc_score,
     coverage_error,
-    confusion_matrix
+    confusion_matrix,
+    classification_report
 )
 import os
 import numpy as np
@@ -173,7 +174,6 @@ def compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_na
     
     jaccard = jaccard_score(y_true, y_pred_classes, average='macro', zero_division=0)
     
-    # Handle AUC-ROC for multilabel
     try:
         auc_roc = roc_auc_score(y_true, y_pred, average='macro')
     except ValueError:
@@ -181,22 +181,8 @@ def compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_na
     
     coverage = coverage_error(y_true, y_pred)
     
-    # Print Metrics
-    print("\nAdditional Metrics:")
-    print(f"Hamming Loss: {h_loss:.4f}")
-    print(f"Exact Match Ratio: {exact_match:.4f}")
-    print(f"Precision (Micro): {precision_micro:.4f}")
-    print(f"Precision (Macro): {precision_macro:.4f}")
-    print(f"Precision (Weighted): {precision_weighted:.4f}")
-    print(f"Recall (Micro): {recall_micro:.4f}")
-    print(f"Recall (Macro): {recall_macro:.4f}")
-    print(f"Recall (Weighted): {recall_weighted:.4f}")
-    print(f"F1-Score (Micro): {f1_micro:.4f}")
-    print(f"F1-Score (Macro): {f1_macro:.4f}")
-    print(f"F1-Score (Weighted): {f1_weighted:.4f}")
-    print(f"Jaccard Index (Macro): {jaccard:.4f}")
-    print(f"AUC-ROC (Macro): {auc_roc:.4f}")
-    print(f"Coverage Error: {coverage:.4f}")
+    # Generate classification report
+    class_report = classification_report(y_true, y_pred_classes, target_names=label_names)
     
     # Save Metrics to a File
     metrics_path = os.path.join(output_dir, 'additional_metrics.txt')
@@ -215,4 +201,8 @@ def compute_and_save_multilabel_metrics(y_true, y_pred_classes, y_pred, label_na
         f.write(f"F1-Score (Weighted): {f1_weighted:.4f}\n")
         f.write(f"Jaccard Index (Macro): {jaccard:.4f}\n")
         f.write(f"AUC-ROC (Macro): {auc_roc:.4f}\n")
-        f.write(f"Coverage Error: {coverage:.4f}\n")
+        f.write(f"Coverage Error: {coverage:.4f}\n\n")
+        f.write("Classification Report:\n")
+        f.write(class_report)
+    
+    print(f"Additional metrics and classification report saved to {metrics_path}")

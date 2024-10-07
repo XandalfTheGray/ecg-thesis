@@ -9,6 +9,8 @@ import seaborn as sns
 import sys
 import tensorflow as tf
 from google.colab import drive
+from tensorflow import keras
+from keras.optimizers import SGD
 import argparse
 
 # Add the directory containing your modules to the Python path
@@ -26,8 +28,6 @@ def main(time_steps, batch_size, resnet_type):
     dataset_name = 'csnecg'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{resnet_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
-    
-    learning_rate = 1e-3
 
     # Define model parameters
     model_params = {
@@ -42,30 +42,30 @@ def main(time_steps, batch_size, resnet_type):
         model = build_resnet18_1d(
             input_shape=(time_steps, 12),
             num_classes=num_classes,
-            activation='sigmoid',
             **model_params
         )
     elif resnet_type == 'resnet34':
         model = build_resnet34_1d(
             input_shape=(time_steps, 12),
             num_classes=num_classes,
-            activation='sigmoid',
             **model_params
         )
     elif resnet_type == 'resnet50':
         model = build_resnet50_1d(
             input_shape=(time_steps, 12),
             num_classes=num_classes,
-            activation='sigmoid',
             **model_params
         )
     else:
         raise ValueError("Invalid ResNet type.")
 
+    # Define optimizer with SGD and momentum
+    optimizer = SGD(learning_rate=1e-4, momentum=0.9) # LR of 1e-4 for ResNet50 case
+
     # Compile the model
     model.compile(
         loss='binary_crossentropy',
-        optimizer=tf.keras.optimizers.Adam(learning_rate),
+        optimizer=optimizer,
         metrics=['accuracy']
     )
 
