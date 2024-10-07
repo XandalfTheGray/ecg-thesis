@@ -32,8 +32,6 @@ def main(time_steps, batch_size):
     model_type = 'transformer'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
-    
-    learning_rate = 1e-3
 
     model_params = {
         'head_size': 256,
@@ -54,7 +52,7 @@ def main(time_steps, batch_size):
         **model_params
     )
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate)
+    optimizer = tf.keras.optimizers.Adam(1e-3)
     optimizer = mixed_precision.LossScaleOptimizer(optimizer)
 
     model.compile(

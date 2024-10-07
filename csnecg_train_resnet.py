@@ -42,31 +42,30 @@ def main(time_steps, batch_size, resnet_type):
         model = build_resnet18_1d(
             input_shape=(time_steps, 12),
             num_classes=num_classes,
+            activation='sigmoid',
             **model_params
         )
     elif resnet_type == 'resnet34':
         model = build_resnet34_1d(
             input_shape=(time_steps, 12),
             num_classes=num_classes,
+            activation='sigmoid',
             **model_params
         )
     elif resnet_type == 'resnet50':
         model = build_resnet50_1d(
             input_shape=(time_steps, 12),
             num_classes=num_classes,
+            activation='sigmoid',
             **model_params
         )
     else:
         raise ValueError("Invalid ResNet type.")
 
-    # Define optimizer with SGD and momentum
-    # optimizer = SGD(learning_rate=1e-3, momentum=0.9)
-    optimizer = tf.keras.optimizers.Adam(1e-3)
-
     # Compile the model
     model.compile(
         loss='binary_crossentropy',
-        optimizer=optimizer,
+        optimizer=tf.keras.optimizers.Adam(1e-3),# SGD(learning_rate=1e-3, momentum=0.9)
         metrics=['accuracy']
     )
 
