@@ -305,24 +305,31 @@ def prepare_csnecg_data(time_steps, base_path, batch_size):
     X, Y_binarized = filter_data(X, Y_binarized)
     X, Y_binarized = remove_rare_combinations(X, Y_binarized)
 
-    # Identify the index of the "Other" class
-    other_class_index = label_names.index('Other')  # Ensure 'label_names' includes 'Other'
+    # Convert label_names to list for indexing
+    label_names = list(label_names)
 
-    # Create a mask to filter out "Other" class samples
-    non_other_mask = Y_binarized[:, other_class_index] == 0  # Assuming one-hot encoding
+    # Ensure 'Other' exists in label_names
+    if 'Other' not in label_names:
+        logging.warning("'Other' class not found in label_names. Skipping removal.")
+    else:
+        # Identify the index of the "Other" class
+        other_class_index = label_names.index('Other')  # Now works because label_names is a list
 
-    # Apply the mask to data and labels
-    X = X[non_other_mask]
-    Y_binarized = Y_binarized[non_other_mask]
+        # Create a mask to filter out "Other" class samples
+        non_other_mask = Y_binarized[:, other_class_index] == 0  # Assuming one-hot encoding
 
-    # Remove the 'Other' column from Y_binarized
-    Y_binarized = np.delete(Y_binarized, other_class_index, axis=1)
+        # Apply the mask to data and labels
+        X = X[non_other_mask]
+        Y_binarized = Y_binarized[non_other_mask]
 
-    # Update label names by removing "Other"
-    label_names = [label for label in label_names if label != 'Other']
+        # Remove the 'Other' column from Y_binarized
+        Y_binarized = np.delete(Y_binarized, other_class_index, axis=1)
 
-    # Update the number of classes
-    num_classes = len(label_names)
+        # Update label names by removing "Other"
+        label_names = [label for label in label_names if label != 'Other']
+
+        # Update the number of classes
+        num_classes = len(label_names)
 
     # Split and scale the data
     X_train, X_valid, X_test, y_train, y_valid, y_test = split_and_scale_data(X, Y_binarized)
@@ -337,6 +344,7 @@ def prepare_csnecg_data(time_steps, base_path, batch_size):
     test_dataset = create_tf_dataset(X_test, y_test, batch_size=batch_size, shuffle=False)
 
     return train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label
+
 
 def main():
     """
