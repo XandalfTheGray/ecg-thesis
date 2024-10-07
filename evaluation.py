@@ -5,6 +5,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tensorflow import keras
 from sklearn.metrics import (
     hamming_loss,
     jaccard_score,
