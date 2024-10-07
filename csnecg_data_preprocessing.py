@@ -298,14 +298,40 @@ def create_tf_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
 
 def prepare_csnecg_data(time_steps, base_path, batch_size):
     """
-    Prepare CSN ECG data for model training.
+    Prepare CSN ECG data for model training, excluding the 'Other' class.
     """
     X, Y_cl = load_preprocessed_data(time_steps, base_path)
     Y_binarized, label_names, Num2Label, label2Num, num_classes = prepare_labels(Y_cl)
     X, Y_binarized = filter_data(X, Y_binarized)
     X, Y_binarized = remove_rare_combinations(X, Y_binarized)
+
+    # Identify the index of the "Other" class
+    other_class_index = label_names.index('Other')  # Ensure 'label_names' includes 'Other'
+
+    # Create a mask to filter out "Other" class samples
+    non_other_mask = Y_binarized[:, other_class_index] == 0  # Assuming one-hot encoding
+
+    # Apply the mask to data and labels
+    X = X[non_other_mask]
+    Y_binarized = Y_binarized[non_other_mask]
+
+    # Remove the 'Other' column from Y_binarized
+    Y_binarized = np.delete(Y_binarized, other_class_index, axis=1)
+
+    # Update label names by removing "Other"
+    label_names = [label for label in label_names if label != 'Other']
+
+    # Update the number of classes
+    num_classes = len(label_names)
+
+    # Split and scale the data
     X_train, X_valid, X_test, y_train, y_valid, y_test = split_and_scale_data(X, Y_binarized)
 
+    # Ensure that the Other class was removed
+    print(f"Number of classes after removal of 'Other': {num_classes}")
+    print(f"Shape of Y_binarized: {Y_binarized.shape}")
+
+    # Create TensorFlow datasets
     train_dataset = create_tf_dataset(X_train, y_train, batch_size=batch_size)
     valid_dataset = create_tf_dataset(X_valid, y_valid, batch_size=batch_size, shuffle=False)
     test_dataset = create_tf_dataset(X_test, y_test, batch_size=batch_size, shuffle=False)
