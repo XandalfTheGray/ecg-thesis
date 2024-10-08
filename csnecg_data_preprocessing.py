@@ -1,5 +1,4 @@
 # csnecg_data_preprocessing.py
-# This script preprocesses the CSN ECG dataset, extracting SNOMED-CT codes and ECG data
 
 import numpy as np
 import os

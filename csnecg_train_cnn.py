@@ -1,5 +1,4 @@
-# File: csnecg_train_cnn.py
-# This script trains a CNN model on the preprocessed CSN ECG dataset
+# csnecg_train_cnn.py
 
 import os
 import numpy as np

@@ -1,14 +1,9 @@
 # models.py
+
 from keras import layers, models
 from keras.regularizers import l2
 from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization, MultiHeadAttention, LayerNormalization, Dense
 from keras.layers import MultiHeadAttention, LayerNormalization, Dense, Dropout, GlobalAveragePooling1D
-
-# models.py
-
-from keras import layers, models
-from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense
-from keras.regularizers import l2
 
 def build_cnn(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
@@ -295,24 +290,6 @@ def build_transformer(input_shape, num_classes, head_size, num_heads, ff_dim, nu
         x = Dropout(mlp_dropout)(x)
     outputs = Dense(num_classes, activation=activation)(x)
     return models.Model(inputs, outputs)
-
-def transformer_encoder_tf(inputs, head_size, num_heads, ff_dim, dropout=0):
-    # Normalization and Attention
-    x = LayerNormalization(epsilon=1e-6)(inputs)
-    x = MultiHeadAttention(
-        key_dim=head_size, num_heads=num_heads, dropout=dropout
-    )(x, x)
-    x = Dropout(dropout)(x)
-    res = x + inputs
-
-    # Feed Forward Part
-    x = LayerNormalization(epsilon=1e-6)(res)
-    x = Dense(ff_dim, activation="relu")(x)
-    x = Dropout(dropout)(x)
-    x = Dense(inputs.shape[-1])(x)
-    return x + res
-
-def build_transformer_tf(input_shape, num_classes, **kwargs):
     inputs = Input(shape=input_shape)
     x = inputs
     

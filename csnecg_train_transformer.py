@@ -1,5 +1,4 @@
-# File: csnecg_train_transformer.py
-# This script trains a Transformer model on the preprocessed CSN ECG dataset
+# csnecg_train_transformer.py
 
 import os
 import numpy as np

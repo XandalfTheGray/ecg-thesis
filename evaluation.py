@@ -1,5 +1,4 @@
 # evaluation.py
-# This script contains functions to evaluate and visualize the performance of multilabel classification models.
 
 import os
 import numpy as np

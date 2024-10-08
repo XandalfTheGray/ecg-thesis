@@ -1,5 +1,4 @@
-# File: csnecg_train_resnet.py
-# This script trains a ResNet model on the preprocessed CSN ECG dataset
+# csnecg_train_resnet.py
 
 import os
 import numpy as np
