@@ -35,11 +35,11 @@ def main(time_steps, batch_size):
 
     model_params = {
         'head_size': 256,
-        'num_heads': 4,
-        'ff_dim': 4,
+        'num_heads': 8,
+        'ff_dim': 16,
         'num_transformer_blocks': 4,
         'mlp_units': [128],
-        'mlp_dropout': 0.4,
+        'mlp_dropout': 0.3,
         'dropout': 0.25,
     }
 
@@ -55,7 +55,7 @@ def main(time_steps, batch_size):
     )
 
     # Compile the model with mixed precision optimizer
-    optimizer = tf.keras.optimizers.Adam(1e-3)
+    optimizer = tf.keras.optimizers.Adam(1e-4)
     optimizer = mixed_precision.LossScaleOptimizer(optimizer)
 
     model.compile(
