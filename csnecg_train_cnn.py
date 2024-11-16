@@ -9,13 +9,19 @@ import sys
 import tensorflow as tf
 from tensorflow import keras
 import argparse
+import time
 
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
 
 # Import your modules
 from models import build_cnn
-from evaluation import evaluate_multilabel_model, CustomProgressBar
+from evaluation import (
+    evaluate_multilabel_model, 
+    CustomProgressBar,
+    TimingCallback,
+    log_timing_info
+)
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
@@ -55,8 +61,13 @@ def main(time_steps, batch_size):
         metrics=['accuracy']
     )
 
-    # Define callbacks for training
+    # Create timing callback
+    timing_callback = TimingCallback()
+    
+    # Add timing callback to the callbacks list
     callbacks = [
+        CustomProgressBar(),
+        timing_callback,
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
         ),
@@ -69,18 +80,49 @@ def main(time_steps, batch_size):
         )
     ]
 
+    # Start prediction timing
+    predict_start_time = time.time()
+
     # Train the model
+    print("\nStarting model training...")
+    training_start = time.time()
+    
     history = model.fit(
         train_dataset,
         epochs=30,
         validation_data=valid_dataset,
         callbacks=callbacks
     )
+    
+    training_end = time.time()
+    total_training_time = training_end - training_start
+    print(f"\nTotal training time: {total_training_time:.2f} seconds")
+    print(f"Average time per epoch: {np.mean(timing_callback.times):.2f} seconds")
 
-    # Generate predictions
+    # Time predictions
+    print("\nGenerating predictions for test set...")
+    test_timing = {}
+    start_time = time.time()
     y_pred = model.predict(test_dataset)
+    end_time = time.time()
+    test_timing['Test'] = end_time - start_time
+    print(f"Test set prediction time: {test_timing['Test']:.2f} seconds")
+
     y_pred_classes = (y_pred > 0.5).astype(int)
     y_true = np.concatenate([y for x, y in test_dataset], axis=0).astype(int)
+
+    # Log timing information
+    model_info = {
+        'model_type': model_type,
+        'dataset': dataset_name,
+        'parameters': model_params
+    }
+    log_timing_info(timing_callback, model_info, output_dir)
+
+    # Add test timing information to the log
+    with open(os.path.join(output_dir, 'test_timing.txt'), 'w') as f:
+        f.write("Prediction/Evaluation Timing:\n")
+        f.write(f"Test Set Prediction Time: {test_timing['Test']:.2f} seconds\n")
 
     # Evaluate and visualize using the centralized evaluate_multilabel_model function
     evaluate_multilabel_model(

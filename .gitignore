@@ -177,7 +177,9 @@ csn_ecg_code/
 
 # output plots
 output_plots/
+output_plots_draft1/
 output_plots_roshancnn/
+output_plots_roshancnn_draft1/
 
 # helper functions
 extract_record_structure.py

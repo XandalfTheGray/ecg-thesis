@@ -10,13 +10,19 @@ import tensorflow as tf
 from tensorflow import keras
 from keras.optimizers import SGD
 import argparse
+import time
 
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
 
 # Import your modules
 from models import build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
-from evaluation import evaluate_multilabel_model, CustomProgressBar
+from evaluation import (
+    evaluate_multilabel_model, 
+    CustomProgressBar,
+    TimingCallback,
+    log_timing_info
+)
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size, resnet_type):
@@ -67,9 +73,13 @@ def main(time_steps, batch_size, resnet_type):
         metrics=['accuracy']
     )
 
-    # Define callbacks for training
+    # Create timing callback
+    timing_callback = TimingCallback()
+    
+    # Add timing callback to the callbacks list
     callbacks = [
         CustomProgressBar(),
+        timing_callback,
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
         ),
@@ -82,6 +92,9 @@ def main(time_steps, batch_size, resnet_type):
         )
     ]
 
+    # Start prediction timing
+    predict_start_time = time.time()
+
     # Train the model
     history = model.fit(
         train_dataset,
@@ -90,10 +103,28 @@ def main(time_steps, batch_size, resnet_type):
         callbacks=callbacks
     )
 
-    # Generate predictions
+    # Time predictions
+    test_timing = {}
+    start_time = time.time()
     y_pred = model.predict(test_dataset)
+    end_time = time.time()
+    test_timing['Test'] = end_time - start_time
+
     y_pred_classes = (y_pred > 0.5).astype(int)
     y_true = np.concatenate([y for x, y in test_dataset], axis=0).astype(int)
+
+    # Log timing information
+    model_info = {
+        'model_type': resnet_type,
+        'dataset': dataset_name,
+        'parameters': model_params
+    }
+    log_timing_info(timing_callback, model_info, output_dir)
+
+    # Add test timing information to the log
+    with open(os.path.join(output_dir, 'test_timing.txt'), 'w') as f:
+        f.write("Prediction/Evaluation Timing:\n")
+        f.write(f"Test Set Prediction Time: {test_timing['Test']:.2f} seconds\n")
 
     # Evaluate and visualize using the centralized evaluate_multilabel_model function
     evaluate_multilabel_model(

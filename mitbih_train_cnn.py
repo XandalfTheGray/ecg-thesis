@@ -5,9 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.utils import class_weight
 from tensorflow import keras
+import time
+from datetime import datetime
 
 # Update this import
-from evaluation import print_stats, showConfusionMatrix, CustomProgressBar
+from evaluation import print_stats, showConfusionMatrix, CustomProgressBar, TimingCallback, log_timing_info
 
 # Import models and evaluation
 from models import build_cnn
@@ -71,25 +73,48 @@ def main():
         metrics=['accuracy']
     )
 
-    # Train model
+    # Create timing callback
+    timing_callback = TimingCallback()
+    
+    # Add timing callback to the callbacks list
+    callbacks = [
+        CustomProgressBar(),
+        timing_callback,
+        keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
+        keras.callbacks.ReduceLROnPlateau(factor=0.1, patience=5)
+    ]
+
+    # Train model with timing
+    print("\nStarting model training...")
+    training_start = time.time()
+    
     history = model.fit(
         X_train, y_nn_train,
         epochs=50,
         batch_size=256,
         validation_data=(X_valid, y_nn_valid),
         class_weight=class_weight_dict,
-        callbacks=[
-            CustomProgressBar(),
-            keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True),
-            keras.callbacks.ReduceLROnPlateau(factor=0.1, patience=5)
-        ],
+        callbacks=callbacks,
         verbose=0
     )
+    
+    training_end = time.time()
+    total_training_time = training_end - training_start
+    print(f"\nTotal training time: {total_training_time:.2f} seconds")
+    print(f"Average time per epoch: {np.mean(timing_callback.times):.2f} seconds")
 
-    # Evaluate
+    # Time the prediction/evaluation phase
+    test_timing = {}
+    
     def evaluate_model(dataset, y_true, name):
+        print(f"\nGenerating predictions for {name} set...")
+        start_time = time.time()
         y_pred = np.argmax(model.predict(dataset), axis=1)
-        print(f"\n{name} Performance")
+        end_time = time.time()
+        test_timing[name] = end_time - start_time
+        
+        print(f"{name} Performance:")
+        print(f"Prediction Time: {test_timing[name]:.2f} seconds")
         print_stats(y_pred, y_true)
         showConfusionMatrix(
             y_pred, y_true, f'confusion_matrix_{name.lower()}.png', output_dir, list(Num2Label.values())
@@ -98,6 +123,28 @@ def main():
     evaluate_model(X_train, y_train, 'Training')
     evaluate_model(X_valid, y_valid, 'Validation')
     evaluate_model(X_test, y_test, 'Test')
+
+    # Log timing information
+    model_info = {
+        'model_type': model_type,
+        'dataset': dataset_name,
+        'parameters': model_params
+    }
+    log_timing_info(timing_callback, model_info, output_dir)
+
+    # Add test timing information to the log
+    with open(os.path.join(output_dir, 'test_timing.txt'), 'w') as f:
+        f.write("Prediction/Evaluation Timing:\n")
+        for name, time_taken in test_timing.items():
+            f.write(f"{name} Set Prediction Time: {time_taken:.2f} seconds\n")
+
+    # Print summary of timing information at the end
+    print("\nTiming Summary:")
+    print(f"Total Training Time: {total_training_time:.2f} seconds")
+    print(f"Average Time per Epoch: {np.mean(timing_callback.times):.2f} seconds")
+    print("\nPrediction Times:")
+    for name, time_taken in test_timing.items():
+        print(f"{name} Set: {time_taken:.2f} seconds")
 
     # Plot
     for metric in ['loss', 'accuracy']:

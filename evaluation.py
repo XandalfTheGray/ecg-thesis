@@ -20,7 +20,9 @@ from sklearn.metrics import (
     roc_curve
 )
 import logging
-
+import time
+from datetime import datetime
+from matplotlib.colors import ListedColormap
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -53,8 +55,15 @@ def showConfusionMatrix(y_pred, y_true, filename, output_dir, label_names):
     """
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=label_names, yticklabels=label_names)
+    ax = plt.gca()
+    sns.heatmap(cm, annot=True, fmt='d', cmap=ListedColormap(['white']),
+                xticklabels=label_names, yticklabels=label_names,
+                linewidths=0.5, linecolor='black')
+    # Add outer border
+    for _, spine in ax.spines.items():
+        spine.set_visible(True)
+        spine.set_linewidth(0.5)
+        spine.set_color('black')
     plt.title('Confusion Matrix')
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
@@ -350,3 +359,49 @@ def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir,
     logging.info(f"Evaluation metrics and plots saved in '{output_dir}'")
     
     return metrics_dict
+
+class TimingCallback(keras.callbacks.Callback):
+    """Callback for tracking training time per epoch."""
+    def on_train_begin(self, logs=None):
+        self.times = []
+        self.start_time = None
+        self.total_start_time = time.time()
+
+    def on_epoch_begin(self, epoch, logs=None):
+        self.start_time = time.time()
+
+    def on_epoch_end(self, epoch, logs=None):
+        if self.start_time is not None:
+            elapsed_time = time.time() - self.start_time
+            self.times.append(elapsed_time)
+            if logs is not None:
+                logs['time'] = elapsed_time
+
+    def get_total_time(self):
+        return time.time() - self.total_start_time
+
+def log_timing_info(timing_callback, model_info, output_dir):
+    """
+    Log timing information to a file.
+    
+    Args:
+        timing_callback: TimingCallback instance with timing data
+        model_info: Dict containing model information (type, parameters, etc.)
+        output_dir: Directory to save the timing log
+    """
+    log_file = os.path.join(output_dir, 'timing_log.txt')
+    
+    with open(log_file, 'w') as f:
+        f.write(f"Model Type: {model_info.get('model_type', 'Not specified')}\n")
+        f.write(f"Dataset: {model_info.get('dataset', 'Not specified')}\n\n")
+        
+        f.write("Training Timing Information:\n")
+        f.write(f"Total Training Time: {timing_callback.get_total_time():.2f} seconds\n")
+        f.write(f"Average Time per Epoch: {np.mean(timing_callback.times):.2f} seconds\n")
+        f.write(f"Fastest Epoch: {np.min(timing_callback.times):.2f} seconds\n")
+        f.write(f"Slowest Epoch: {np.max(timing_callback.times):.2f} seconds\n")
+        f.write(f"Number of Epochs: {len(timing_callback.times)}\n\n")
+        
+        f.write("Per-Epoch Timing:\n")
+        for epoch, time_taken in enumerate(timing_callback.times, 1):
+            f.write(f"Epoch {epoch}: {time_taken:.2f} seconds\n")
