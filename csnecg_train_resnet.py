@@ -10,10 +10,6 @@ from tensorflow import keras
 import argparse
 import time
 
-# Mount Google Drive and set paths
-from google.colab import drive
-drive.mount('/content/drive')
-
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
 

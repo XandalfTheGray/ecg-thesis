@@ -10,13 +10,6 @@ from tensorflow import keras
 import argparse
 import time
 
-# Mount Google Drive and set paths
-from google.colab import drive
-drive.mount('/content/drive')
-
-# Add the directory containing your modules to the Python path
-sys.path.append('/content/ecg-thesis')
-
 # Import your modules
 from models import build_cnn
 from evaluation import (
@@ -28,9 +21,8 @@ from evaluation import (
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
-    # Set up output directories
-    base_path = '/content/drive/MyDrive/'
-    base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
+    # Set up output directories for local execution
+    base_output_dir = 'csnecg_output_plots'
     dataset_name = 'csnecg'
     model_type = 'cnn'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
@@ -56,7 +48,7 @@ def main(time_steps, batch_size):
         label_names,
         Num2Label,
     ) = prepare_csnecg_data(
-        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
+        base_path='.',  # Current directory
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
