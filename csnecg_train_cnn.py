@@ -47,7 +47,8 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     num_classes = Y.shape[1]
 
     # Prepare data
-    train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps, y_test = prepare_data_for_training(
+    (train_dataset, valid_dataset, test_dataset, 
+     steps_per_epoch, validation_steps, test_steps, y_test) = prepare_data_for_training(
         X, Y, batch_size=batch_size
     )
 
@@ -115,7 +116,6 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     start_time = time.time()
     y_pred = model.predict(
         test_dataset,
-        steps=test_steps,
         verbose=1
     )
     end_time = time.time()
