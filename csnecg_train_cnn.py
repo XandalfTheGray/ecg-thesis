@@ -22,9 +22,12 @@ from evaluation import (
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
-    # Set up base path for data on Google Drive
+    # Enable mixed precision
+    policy = tf.keras.mixed_precision.Policy('mixed_float16')
+    tf.keras.mixed_precision.set_global_policy(policy)
+    
+    # Set up base path for OUTPUTS on Google Drive
     base_path = '/content/drive/MyDrive/'
-    # Set up output directories
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'cnn'
@@ -41,23 +44,8 @@ def main(time_steps, batch_size):
         'dropout_rates': [0.3, 0.3, 0.3, 0.3],
     }
 
-    # Prepare data
-    peaks_per_signal = 10  # Match the value used in preprocessing
-    (
-        train_dataset,
-        valid_dataset,
-        test_dataset,
-        num_classes,
-        label_names,
-        Num2Label,
-    ) = prepare_csnecg_data(
-        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
-        batch_size=batch_size,
-        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
-    )
-
-    # Calculate dataset sizes correctly
-    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
+    # Calculate dataset sizes from local HDF5
+    with h5py.File(f'csnecg_segments_{peaks_per_signal}peaks.hdf5', 'r') as f:
         total_size = f['segments'].shape[0]
         train_size = int(0.7 * total_size)
         valid_size = int(0.15 * total_size)
@@ -68,18 +56,42 @@ def main(time_steps, batch_size):
     validation_steps = valid_size // batch_size
     test_steps = test_size // batch_size
 
-    # Build the CNN model
+    # Prepare data with optimized memory usage
+    peaks_per_signal = 1
+    (
+        train_dataset,
+        valid_dataset,
+        test_dataset,
+        num_classes,
+        label_names,
+        Num2Label,
+    ) = prepare_csnecg_data(
+        base_path='.',
+        batch_size=batch_size,
+        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    )
+    
+    # Enable prefetching and parallel processing
+    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+    valid_dataset = valid_dataset.prefetch(tf.data.AUTOTUNE)
+    test_dataset = test_dataset.prefetch(tf.data.AUTOTUNE)
+    
+    # Build model with mixed precision
     model = build_cnn(
         input_shape=(time_steps, 12),
         num_classes=num_classes,
         activation='sigmoid',
         **model_params
     )
-
+    
+    # Use AMP-optimized optimizer
+    optimizer = tf.keras.optimizers.Adam(learning_rate)
+    optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+    
     # Compile the model
     model.compile(
         loss='binary_crossentropy',
-        optimizer=tf.keras.optimizers.Adam(learning_rate),
+        optimizer=optimizer,
         metrics=['accuracy']
     )
 
@@ -102,6 +114,14 @@ def main(time_steps, batch_size):
         )
     ]
 
+    # Add memory tracking callback
+    class MemoryCallback(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            memory = tf.config.experimental.get_memory_info('GPU:0')
+            print(f"\nGPU Memory: {memory['peak'] / 1e9:.2f} GB")
+    
+    callbacks.append(MemoryCallback())
+    
     # Train the model
     print("\nStarting model training...")
     training_start = time.time()

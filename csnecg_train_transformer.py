@@ -30,14 +30,26 @@ from evaluation import (
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
-    # Set up base path for data on Google Drive
+    # Set up base path for OUTPUTS on Google Drive
     base_path = '/content/drive/MyDrive/'
-    # Set up output directories
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'transformer'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
+
+    # Calculate dataset sizes from local HDF5
+    peaks_per_signal = 1
+    with h5py.File(f'csnecg_segments_{peaks_per_signal}peaks.hdf5', 'r') as f:
+        total_size = f['segments'].shape[0]
+        train_size = int(0.7 * total_size)
+        valid_size = int(0.15 * total_size)
+        test_size = total_size - train_size - valid_size
+
+    # Calculate steps correctly
+    steps_per_epoch = train_size // batch_size
+    validation_steps = valid_size // batch_size
+    test_steps = test_size // batch_size
 
     # Define model parameters
     model_params = {
@@ -50,8 +62,7 @@ def main(time_steps, batch_size):
         'dropout': 0.25,
     }
 
-    # Prepare data
-    peaks_per_signal = 10  # Match the value used in preprocessing
+    # Prepare data - using current directory for HDF5 file
     (
         train_dataset,
         valid_dataset,
@@ -60,7 +71,7 @@ def main(time_steps, batch_size):
         label_names,
         Num2Label,
     ) = prepare_csnecg_data(
-        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
+        base_path='.',  # Current directory for HDF5 file
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
@@ -100,10 +111,6 @@ def main(time_steps, batch_size):
             monitor='val_loss', save_best_only=True, verbose=1
         )
     ]
-
-    # Calculate steps per epoch
-    steps_per_epoch = train_size // batch_size
-    validation_steps = valid_size // batch_size
 
     # Train the model
     print("\nStarting model training...")

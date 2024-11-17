@@ -12,9 +12,22 @@ from collections import Counter
 import h5py
 import tensorflow as tf
 import collections
+from scipy.signal import find_peaks
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# At the top of the file, add constants
+CHUNK_SIZE = 1000  # Consistent chunk size for HDF5 storage
+SHUFFLE_BUFFER_SIZE = CHUNK_SIZE  # Reduced from CHUNK_SIZE * 5
+BATCH_SIZE = CHUNK_SIZE  # Match batch size to chunk size
+IMPORTANT_LEADS = [0, 1, 6, 7, 8, 9, 10, 11]  # Leads I, II, V1-V6
+PEAK_PARAMS = {
+    'distance': 50,
+    'height': 0.1,
+    'prominence': 0.2
+}
+BASE_DATABASE_PATH = 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0'
 
 def load_snomed_ct_mapping(csv_path, class_mapping):
     """
@@ -73,7 +86,7 @@ def filter_ecg(signal, fs=500, lowcut=0.5, highcut=50.0):
     b, a = butter(2, [low, high], btype='band')
     return filtfilt(b, a, signal)
 
-def detect_r_peaks(ecg_data, distance=50, fs=500):
+def detect_r_peaks(ecg_data, distance=50, fs=500, filtered_signals=None):
     """
     Detect R-peaks using multiple leads with filtering for more robust detection.
     
@@ -81,25 +94,21 @@ def detect_r_peaks(ecg_data, distance=50, fs=500):
     - ecg_data: 12-lead ECG data (timesteps, 12)
     - distance: Minimum distance between peaks
     - fs: Sampling frequency in Hz
+    - filtered_signals: Optional pre-filtered signals dictionary
     
     Returns:
     - peaks: Array of R-peak locations
     """
     from scipy.signal import find_peaks
     
-    # Use leads I, II, and V1-V6 for peak detection
-    important_leads = [0, 1, 6, 7, 8, 9, 10, 11]  # Leads I, II, V1-V6
-    
     all_peaks = []
-    for lead_idx in important_leads:
-        # Filter the signal
-        filtered_signal = filter_ecg(ecg_data[:, lead_idx], fs=fs)
+    for lead_idx in IMPORTANT_LEADS:
+        if filtered_signals and lead_idx in filtered_signals:
+            filtered_signal = filtered_signals[lead_idx]
+        else:
+            filtered_signal = filter_ecg(ecg_data[:, lead_idx], fs=fs)
         
-        # Find peaks in filtered signal
-        peaks, _ = find_peaks(filtered_signal, 
-                              distance=distance,
-                              height=0.1,  # Minimum height for peaks
-                              prominence=0.2)  # Minimum prominence for peaks
+        peaks, _ = find_peaks(filtered_signal, **PEAK_PARAMS)
         all_peaks.append(peaks)
     
     # Find consensus peaks
@@ -124,7 +133,7 @@ def segment_signal(signal, r_peaks, labels, window_size=300):
     """
     if len(r_peaks) == 0:
         # Try to find at least one peak in any lead
-        for lead_idx in [0, 1, 6, 7, 8, 9, 10, 11]:  # Important leads
+        for lead_idx in IMPORTANT_LEADS:  # Important leads
             # Always filter before peak detection
             filtered_signal = filter_ecg(signal[:, lead_idx], fs=500)
             peaks, _ = find_peaks(filtered_signal, 
@@ -178,96 +187,120 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
         # Create HDF5 filename with peaks_per_signal
         hdf5_file_path = f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
         
-        # Configure compression
-        compression_opts = {
-            'compression': 'gzip',  # Use GZIP compression
-            'compression_opts': 9,  # Highest compression level (1-9)
-            'shuffle': True,        # Enable shuffle filter
-            'chunks': True          # Enable automatic chunking
+        # Configure compression for segments (3D data)
+        segments_compression_opts = {
+            'compression': 'gzip',
+            'compression_opts': 9,
+            'shuffle': True,
+            'chunks': (CHUNK_SIZE, 300, 12)
+        }
+        
+        # Configure compression for labels (1D data)
+        labels_compression_opts = {
+            'compression': 'gzip',
+            'compression_opts': 9,
+            'shuffle': True,
+            'chunks': (CHUNK_SIZE,)  # 1D chunks for 1D data
         }
         
         with h5py.File(hdf5_file_path, 'w') as hdf5_file:
-            # Use chunked storage for better I/O
-            chunk_size = min(1000, len(data_entries))  # Adjust based on memory
-            
             segments_dataset = hdf5_file.create_dataset(
                 'segments',
                 shape=(0, 300, 12),
                 maxshape=(None, 300, 12),
                 dtype=np.float32,
-                chunks=(chunk_size, 300, 12),  # Explicit chunking
-                **compression_opts
+                **segments_compression_opts
             )
+            
+            labels_dataset = hdf5_file.create_dataset(
+                'labels',
+                shape=(0,),
+                maxshape=(None,),
+                dtype=h5py.special_dtype(vlen=np.dtype('int32')),
+                **labels_compression_opts
+            )
+            
+            # Add label_names dataset
+            label_names_set = set()
+            
+            # First pass to collect all unique labels
+            for record in data_entries:
+                try:
+                    record_header = wfdb.rdheader(os.path.join(database_path, record))
+                    snomed_codes = extract_snomed_ct_codes(record_header)
+                    for code in snomed_codes:
+                        if code in snomed_ct_mapping:
+                            label_names_set.add(snomed_ct_mapping[code])
+                except Exception as e:
+                    continue
+            
+            label_names_list = sorted(list(label_names_set))
+            hdf5_file.create_dataset('label_names', data=np.array(label_names_list, dtype='S'))
+            
+            # Create label to index mapping
+            label_to_index = {label: idx for idx, label in enumerate(label_names_list)}
             
             # Process in batches
             batch_segments = []
             batch_labels = []
-            batch_size = 100  # Adjust based on memory
             
             for i, record in enumerate(data_entries):
                 try:
-                    if i % 100 == 0:
+                    if i % 1000 == 0:  # Reduced logging frequency
                         logging.info(f"Processing record {i}/{total_records}")
                     
+                    # Load ECG data
                     mat_file = os.path.join(database_path, record + '.mat')
                     hea_file = os.path.join(database_path, record + '.hea')
                     
                     if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-                        logging.warning(f"Files not found for record {record}")
                         skipped_records += 1
                         continue
                     
-                    # Load ECG data
-                    mat_data = loadmat(mat_file)
-                    if 'val' not in mat_data:
-                        logging.warning(f"'val' key not found in mat file for record {record}")
+                    # Efficient data loading
+                    ecg_data = loadmat(mat_file)['val'].T if 'val' in loadmat(mat_file) else None
+                    if ecg_data is None:
                         skipped_records += 1
                         continue
-                    ecg_data = mat_data['val'].T
                     
-                    # Read the header file
-                    record_header = wfdb.rdheader(os.path.join(database_path, record))
-                    
-                    # Extract SNOMED codes and map to labels
-                    snomed_codes = extract_snomed_ct_codes(record_header)
-                    valid_classes = []
-                    for code in snomed_codes:
-                        if code in snomed_ct_mapping:
-                            class_name = snomed_ct_mapping[code]
-                            valid_classes.append(class_name)
-                            diagnosis_counts[class_name] = diagnosis_counts.get(class_name, 0) + 1
-                        else:
-                            valid_classes.append('Other')
-                            diagnosis_counts['Other'] = diagnosis_counts.get('Other', 0) + 1
-                    
-                    # Remove duplicates and 'Other' if there are other valid classes
-                    valid_classes = list(set(valid_classes))
-                    if len(valid_classes) > 1 and 'Other' in valid_classes:
-                        valid_classes.remove('Other')
-                    
-                    # Cache filtered signals
+                    # Cache filtered signals for frequently used leads
                     if record not in filtered_signals:
                         filtered_signals[record] = {
                             lead: filter_ecg(ecg_data[:, lead], fs=500)
-                            for lead in [0, 1, 6, 7, 8, 9, 10, 11]
+                            for lead in IMPORTANT_LEADS
                         }
                     
-                    # Use cached filtered signals
+                    # Process peaks and segments in one go
                     peaks = detect_r_peaks(ecg_data, filtered_signals=filtered_signals[record])
                     
-                    # Process segments
-                    segments, valid_labels = segment_signal(
-                        ecg_data, peaks, valid_classes,
-                        filtered_signals=filtered_signals[record]
-                    )
+                    # Skip first and last peaks, and limit to peaks_per_signal
+                    if len(peaks) > 2:  # Need at least 3 peaks to skip first and last
+                        peaks = peaks[1:-1]  # Skip first and last peaks
+                        if len(peaks) > peaks_per_signal:
+                            peaks = peaks[:peaks_per_signal]  # Take first n peaks after skipping
+                    elif len(peaks) > 0:
+                        # If we have less than 3 peaks, just take the middle one
+                        peaks = [peaks[len(peaks)//2]]
                     
-                    # Batch processing
+                    # Extract labels once
+                    record_header = wfdb.rdheader(os.path.join(database_path, record))
+                    snomed_codes = extract_snomed_ct_codes(record_header)
+                    label_indices = [
+                        label_to_index[snomed_ct_mapping[code]]
+                        for code in snomed_codes
+                        if code in snomed_ct_mapping
+                    ]
+                    label_indices = list(set(label_indices))  # Remove duplicates
+                    
+                    # Process segments
+                    segments, _ = segment_signal(ecg_data, peaks, label_indices)
+                    
                     if segments.size > 0:
                         batch_segments.append(segments)
-                        batch_labels.extend([valid_labels] * len(segments))
+                        batch_labels.extend([label_indices] * len(segments))
                     
                     # Write batch when full
-                    if len(batch_segments) >= batch_size:
+                    if len(batch_segments) >= BATCH_SIZE:
                         _write_batch_to_hdf5(
                             hdf5_file, batch_segments, batch_labels,
                             segments_dataset, labels_dataset
@@ -275,8 +308,8 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
                         batch_segments = []
                         batch_labels = []
                     
-                    # Clear filtered signals cache periodically
-                    if i % 1000 == 0:
+                    # Clear filtered signals cache less frequently
+                    if i % 5000 == 0:  # Increased from 1000
                         filtered_signals.clear()
                     
                 except Exception as e:
@@ -296,15 +329,26 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
 
 def _write_batch_to_hdf5(hdf5_file, batch_segments, batch_labels, segments_dataset, labels_dataset):
     """Helper function to write batches to HDF5 file."""
-    segments = np.concatenate(batch_segments, axis=0)
-    current_size = segments_dataset.shape[0]
-    new_size = current_size + len(segments)
-    
-    segments_dataset.resize(new_size, axis=0)
-    segments_dataset[current_size:new_size] = segments
-    
-    labels_dataset.resize(new_size, axis=0)
-    labels_dataset[current_size:new_size] = batch_labels
+    try:
+        # Pre-allocate arrays for better performance
+        segments = np.concatenate(batch_segments, axis=0)
+        labels = np.array(batch_labels, dtype=object)
+        
+        # Single resize operation
+        current_size = segments_dataset.shape[0]
+        new_size = current_size + len(segments)
+        
+        # Bulk write operations
+        segments_dataset.resize(new_size, axis=0)
+        labels_dataset.resize(new_size, axis=0)
+        
+        # Write in one operation
+        segments_dataset[current_size:new_size] = segments
+        labels_dataset[current_size:new_size] = labels
+            
+    except Exception as e:
+        logging.error(f"Error in _write_batch_to_hdf5: {str(e)}")
+        raise
 
 def load_preprocessed_data_generator(hdf5_file_path):
     """Generator function to yield samples from HDF5 file."""
@@ -351,19 +395,27 @@ def prepare_csnecg_data(
                 tf.TensorSpec(shape=(300, 12), dtype=tf.float32),
                 tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
             )
-        ).prefetch(tf.data.AUTOTUNE)
+        )
         
-        # Shuffle with a larger buffer
-        dataset = dataset.shuffle(buffer_size=min(50000, total_size))
+        # First shuffle with small buffer
+        dataset = dataset.shuffle(
+            buffer_size=SHUFFLE_BUFFER_SIZE,
+            seed=42  # For reproducibility
+        )
         
-        # Split the dataset
+        # Split datasets
         train_dataset = dataset.take(train_size)
         remaining = dataset.skip(train_size)
         valid_dataset = remaining.take(valid_size)
-        test_dataset = remaining.skip(valid_size).take(test_size)
+        test_dataset = remaining.skip(valid_size)
+        
+        # Then apply smaller, per-epoch shuffling to training data only
+        train_dataset = train_dataset.shuffle(
+            buffer_size=min(SHUFFLE_BUFFER_SIZE, train_size),
+            reshuffle_each_iteration=True
+        ).batch(batch_size).prefetch(tf.data.AUTOTUNE)
         
         # Batch and cache the datasets
-        train_dataset = train_dataset.batch(batch_size).cache().repeat()
         valid_dataset = valid_dataset.batch(batch_size).cache().repeat()
         test_dataset = test_dataset.batch(batch_size).cache()
         
@@ -393,12 +445,8 @@ def check_label_distribution(num_peaks):
 
 def main():
     # Define paths
-    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
-                                'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
-                                'WFDBRecords')
-    csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
-                            'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
-                            'ConditionNames_SNOMED-CT.csv')
+    database_path = os.path.join(BASE_DATABASE_PATH, BASE_DATABASE_PATH, 'WFDBRecords')
+    csv_path = os.path.join(BASE_DATABASE_PATH, BASE_DATABASE_PATH, 'ConditionNames_SNOMED-CT.csv')
 
     # Define the class mapping
     class_mapping = {

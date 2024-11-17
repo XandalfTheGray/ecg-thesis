@@ -25,9 +25,8 @@ from evaluation import (
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size, resnet_type):
-    # Set up base path for data on Google Drive
+    # Set up base path for OUTPUTS on Google Drive
     base_path = '/content/drive/MyDrive/'
-    # Set up output directories
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = resnet_type
@@ -41,8 +40,8 @@ def main(time_steps, batch_size, resnet_type):
         'l2_reg': 0.001,
     }
 
-    # Prepare data
-    peaks_per_signal = 10  # Match the value used in preprocessing
+    # Prepare data - using current directory for HDF5 file
+    peaks_per_signal = 1  # Match the value used in preprocessing
     (
         train_dataset,
         valid_dataset,
@@ -51,20 +50,22 @@ def main(time_steps, batch_size, resnet_type):
         label_names,
         Num2Label,
     ) = prepare_csnecg_data(
-        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
+        base_path='.',  # Current directory for HDF5 file
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
 
-    # Calculate train and validation sizes from the dataset info
-    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
+    # Calculate dataset sizes from local HDF5
+    with h5py.File(f'csnecg_segments_{peaks_per_signal}peaks.hdf5', 'r') as f:
         total_size = f['segments'].shape[0]
         train_size = int(0.7 * total_size)
         valid_size = int(0.15 * total_size)
+        test_size = total_size - train_size - valid_size
 
-    # Calculate steps
+    # Calculate steps correctly
     steps_per_epoch = train_size // batch_size
     validation_steps = valid_size // batch_size
+    test_steps = test_size // batch_size
 
     # Build the ResNet model based on the specified type
     if resnet_type == 'resnet18':
