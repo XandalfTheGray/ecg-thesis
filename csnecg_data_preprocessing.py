@@ -170,23 +170,31 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
         total_records = len(data_entries)
         
         # Create HDF5 filename with peaks_per_signal
-        base_path = '/content/drive/MyDrive/'
-        hdf5_file_path = os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5')
+        hdf5_file_path = f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+        
+        # Configure compression
+        compression_opts = {
+            'compression': 'gzip',  # Use GZIP compression
+            'compression_opts': 9,  # Highest compression level (1-9)
+            'shuffle': True,        # Enable shuffle filter
+            'chunks': True          # Enable automatic chunking
+        }
         
         with h5py.File(hdf5_file_path, 'w') as hdf5_file:
-            # Create dataset placeholders with max shape
+            # Create dataset placeholders with max shape and compression
             segments_dataset = hdf5_file.create_dataset(
                 'segments',
                 shape=(0, 300, 12),
                 maxshape=(None, 300, 12),
-                chunks=True,
-                dtype=np.float32
+                dtype=np.float32,
+                **compression_opts
             )
             labels_dataset = hdf5_file.create_dataset(
                 'labels',
                 shape=(0, ),
                 maxshape=(None, ),
-                dtype=h5py.special_dtype(vlen=np.dtype('int32'))
+                dtype=h5py.special_dtype(vlen=np.dtype('int32')),
+                **compression_opts
             )
             label_names_set = set()
             
@@ -385,11 +393,10 @@ def prepare_csnecg_data(
 
 def main():
     # Define paths
-    base_path = '/content/drive/MyDrive/'
-    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                                 'WFDBRecords')
-    csv_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                             'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                             'ConditionNames_SNOMED-CT.csv')
 
