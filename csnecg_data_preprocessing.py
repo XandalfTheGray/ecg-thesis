@@ -257,11 +257,12 @@ def load_data_numpy(data_dir, peaks_per_signal):
     """
     specific_dir = os.path.join(data_dir, f'peaks_{peaks_per_signal}')
     
+    # Load with allow_pickle=True for label_names
     with np.load(os.path.join(specific_dir, 'X.npz')) as data:
         X = data['arr_0']
     with np.load(os.path.join(specific_dir, 'Y.npz')) as data:
         Y = data['arr_0']
-    with np.load(os.path.join(specific_dir, 'label_names.npz')) as data:
+    with np.load(os.path.join(specific_dir, 'label_names.npz'), allow_pickle=True) as data:
         label_names = data['arr_0']
     
     return X, Y, label_names
@@ -342,12 +343,16 @@ def ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal):
         
         print(f"Processing {npz_file}...")
         
-        # Load the npz file
-        with np.load(source_path) as data:
-            # Save as npy file (first array in the npz file)
-            npy_path = os.path.join(specific_dir, npz_file.replace('.npz', '.npy'))
-            np.save(npy_path, data['arr_0'])
-            print(f"Saved to {npy_path}")
+        # Load the npz file with allow_pickle=True for label_names
+        if npz_file == 'label_names.npz':
+            with np.load(source_path, allow_pickle=True) as data:
+                npy_path = os.path.join(specific_dir, npz_file.replace('.npz', '.npy'))
+                np.save(npy_path, data['arr_0'], allow_pickle=True)
+        else:
+            with np.load(source_path) as data:
+                npy_path = os.path.join(specific_dir, npz_file.replace('.npz', '.npy'))
+                np.save(npy_path, data['arr_0'])
+        print(f"Saved to {npy_path}")
 
     print("Data preparation completed.")
 

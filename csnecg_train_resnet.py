@@ -28,7 +28,7 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
     os.makedirs(output_dir, exist_ok=True)
 
     # Define Google Drive data directory
-    drive_data_dir = os.path.join(base_path, 'csnecg_preprocessed_data_zipped')
+    drive_data_dir = os.path.join(base_path, 'csnecg_preprocessed_data')
 
     # Local data directory
     local_data_dir = 'csnecg_preprocessed_data'
