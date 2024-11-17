@@ -163,6 +163,9 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
     skipped_records = 0
     diagnosis_counts = {}
     
+    # Pre-allocate memory for common operations
+    filtered_signals = {}  # Cache for filtered signals
+    
     try:
         logging.info(f"Starting to process data. Max records: {max_records}, Peaks per signal: {peaks_per_signal}")
         
@@ -184,22 +187,22 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
         }
         
         with h5py.File(hdf5_file_path, 'w') as hdf5_file:
-            # Create dataset placeholders with max shape and compression
+            # Use chunked storage for better I/O
+            chunk_size = min(1000, len(data_entries))  # Adjust based on memory
+            
             segments_dataset = hdf5_file.create_dataset(
                 'segments',
                 shape=(0, 300, 12),
                 maxshape=(None, 300, 12),
                 dtype=np.float32,
+                chunks=(chunk_size, 300, 12),  # Explicit chunking
                 **compression_opts
             )
-            labels_dataset = hdf5_file.create_dataset(
-                'labels',
-                shape=(0, ),
-                maxshape=(None, ),
-                dtype=h5py.special_dtype(vlen=np.dtype('int32')),
-                **compression_opts
-            )
-            label_names_set = set()
+            
+            # Process in batches
+            batch_segments = []
+            batch_labels = []
+            batch_size = 100  # Adjust based on memory
             
             for i, record in enumerate(data_entries):
                 try:
@@ -242,78 +245,66 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
                     if len(valid_classes) > 1 and 'Other' in valid_classes:
                         valid_classes.remove('Other')
                     
-                    # Update label names set
-                    label_names_set.update(valid_classes)
+                    # Cache filtered signals
+                    if record not in filtered_signals:
+                        filtered_signals[record] = {
+                            lead: filter_ecg(ecg_data[:, lead], fs=500)
+                            for lead in [0, 1, 6, 7, 8, 9, 10, 11]
+                        }
                     
-                    # Detect R-peaks
-                    peaks = detect_r_peaks(ecg_data)
+                    # Use cached filtered signals
+                    peaks = detect_r_peaks(ecg_data, filtered_signals=filtered_signals[record])
                     
-                    # Use whatever peaks we found (even if less than peaks_per_signal)
-                    if len(peaks) > peaks_per_signal:
-                        np.random.seed(42)
-                        peaks = np.random.choice(peaks, peaks_per_signal, replace=False)
-                        peaks.sort()
+                    # Process segments
+                    segments, valid_labels = segment_signal(
+                        ecg_data, peaks, valid_classes,
+                        filtered_signals=filtered_signals[record]
+                    )
                     
-                    # Segment signals (will handle case of no peaks internally)
-                    segments, valid_labels = segment_signal(ecg_data, peaks, valid_classes)
+                    # Batch processing
+                    if segments.size > 0:
+                        batch_segments.append(segments)
+                        batch_labels.extend([valid_labels] * len(segments))
                     
-                    # Only skip if no segments were created
-                    if segments.size == 0:
-                        logging.warning(f"No valid segments extracted from record {record}")
-                        skipped_records += 1
-                        continue
+                    # Write batch when full
+                    if len(batch_segments) >= batch_size:
+                        _write_batch_to_hdf5(
+                            hdf5_file, batch_segments, batch_labels,
+                            segments_dataset, labels_dataset
+                        )
+                        batch_segments = []
+                        batch_labels = []
                     
-                    # Save whatever segments we got
-                    num_new_segments = segments.shape[0]
-                    segments_dataset.resize(segments_dataset.shape[0] + num_new_segments, axis=0)
-                    segments_dataset[-num_new_segments:] = segments.astype(np.float32)
+                    # Clear filtered signals cache periodically
+                    if i % 1000 == 0:
+                        filtered_signals.clear()
                     
-                    # Convert labels to integer indices
-                    labels_indices = []
-                    for _ in range(num_new_segments):
-                        indices = [sorted(label_names_set).index(lbl) for lbl in valid_classes]
-                        labels_indices.append(np.array(indices, dtype=np.int32))
-                    labels_dataset.resize(labels_dataset.shape[0] + num_new_segments, axis=0)
-                    labels_dataset[-num_new_segments:] = labels_indices
-                    
-                    processed_records += 1
-                    
-                    if max_records and processed_records >= max_records:
-                        break
-                        
                 except Exception as e:
-                    logging.error(f"Error processing record {record}: {str(e)}")
-                    skipped_records += 1
+                    logging.warning(f"Error processing record {record}: {str(e)}")
                     continue
                 
-                # Periodically save progress every 10,000 records
-                if processed_records % 10000 == 0 and processed_records > 0:
-                    try:
-                        temp_dir = 'csnecg_preprocessed_data_temp'
-                        os.makedirs(temp_dir, exist_ok=True)
-                        temp_hdf5_path = os.path.join(temp_dir, f'csnecg_segments_{processed_records}.hdf5')
-                        with h5py.File(temp_hdf5_path, 'w') as temp_hdf5:
-                            temp_hdf5.create_dataset('segments', data=segments.astype(np.float32))
-                            temp_hdf5.create_dataset('labels', data=labels_indices)
-                        logging.info(f"Saved temporary progress at {processed_records} records")
-                    except Exception as e:
-                        logging.error(f"Error saving temporary progress: {str(e)}")
-        
-            # Save label names
-            label_names_list = sorted(label_names_set)
-            hdf5_file.create_dataset('label_names', data=np.array(label_names_list, dtype='S'))
-            # Save mapping of labels to indices
-            label_to_index = {label: idx for idx, label in enumerate(label_names_list)}
-            hdf5_file.attrs['label_to_index'] = str(label_to_index)
-            
-            logging.info(f"Processed {processed_records} records")
-            logging.info(f"Skipped {skipped_records} records")
-            logging.info(f"Diagnosis counts: {diagnosis_counts}")
-            logging.info(f"Data saved to {hdf5_file_path}")
-            
+            # Write remaining batch
+            if batch_segments:
+                _write_batch_to_hdf5(
+                    hdf5_file, batch_segments, batch_labels,
+                    segments_dataset, labels_dataset
+                )
+    
     except Exception as e:
-        logging.error(f"Critical error in process_and_save_segments: {str(e)}")
+        logging.error(f"Critical error: {str(e)}")
         raise
+
+def _write_batch_to_hdf5(hdf5_file, batch_segments, batch_labels, segments_dataset, labels_dataset):
+    """Helper function to write batches to HDF5 file."""
+    segments = np.concatenate(batch_segments, axis=0)
+    current_size = segments_dataset.shape[0]
+    new_size = current_size + len(segments)
+    
+    segments_dataset.resize(new_size, axis=0)
+    segments_dataset[current_size:new_size] = segments
+    
+    labels_dataset.resize(new_size, axis=0)
+    labels_dataset[current_size:new_size] = batch_labels
 
 def load_preprocessed_data_generator(hdf5_file_path):
     """Generator function to yield samples from HDF5 file."""
