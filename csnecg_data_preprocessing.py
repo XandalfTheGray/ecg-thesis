@@ -310,36 +310,45 @@ def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=12
 def ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal):
     """
     Ensure that the preprocessed data is available in the local directory.
-    If not, copy it from Google Drive and unzip it.
+    If not, copy the .npz files from Google Drive and unzip them into .npy files.
     """
-    # Check if data already exists in local directory
+    import shutil
+
+    # Check if local directory exists and has .npy files
     specific_dir = os.path.join(local_data_dir, f'peaks_{peaks_per_signal}')
-    if os.path.exists(specific_dir):
+    npy_files = ['X.npy', 'Y.npy', 'label_names.npy']
+    
+    # Check if all .npy files exist
+    if os.path.exists(specific_dir) and all(os.path.exists(os.path.join(specific_dir, f)) for f in npy_files):
         print(f"Data already available in {specific_dir}")
         return
 
-    # Construct the path to the zipped data in Google Drive
-    zip_file_name = f'peaks_{peaks_per_signal}.zip'
-    zip_file_path = os.path.join(drive_data_dir, zip_file_name)
+    # Construct paths for source files in Google Drive
+    drive_peaks_dir = os.path.join(drive_data_dir, f'peaks_{peaks_per_signal}')
+    if not os.path.exists(drive_peaks_dir):
+        raise FileNotFoundError(f"Data directory not found at {drive_peaks_dir}")
 
-    if not os.path.exists(zip_file_path):
-        raise FileNotFoundError(f"Zipped data not found at {zip_file_path}")
+    # Create local directory structure
+    os.makedirs(specific_dir, exist_ok=True)
 
-    # Create local data directory if it doesn't exist
-    os.makedirs(local_data_dir, exist_ok=True)
+    # Files to process
+    npz_files = ['X.npz', 'Y.npz', 'label_names.npz']
 
-    # Copy the zipped file from Google Drive to local directory
-    local_zip_path = os.path.join(local_data_dir, zip_file_name)
-    print(f"Copying data from Google Drive to {local_zip_path}...")
-    shutil.copy(zip_file_path, local_zip_path)
+    # Copy and unzip each file
+    for npz_file in npz_files:
+        source_path = os.path.join(drive_peaks_dir, npz_file)
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"File {npz_file} not found in {drive_peaks_dir}")
+        
+        print(f"Processing {npz_file}...")
+        
+        # Load the npz file
+        with np.load(source_path) as data:
+            # Save as npy file (first array in the npz file)
+            npy_path = os.path.join(specific_dir, npz_file.replace('.npz', '.npy'))
+            np.save(npy_path, data['arr_0'])
+            print(f"Saved to {npy_path}")
 
-    # Unzip the data
-    print(f"Unzipping data to {local_data_dir}...")
-    with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
-        zip_ref.extractall(local_data_dir)
-
-    # Remove the zipped file to save space
-    os.remove(local_zip_path)
     print("Data preparation completed.")
 
 def main():
