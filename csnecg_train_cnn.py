@@ -1,15 +1,11 @@
 # csnecg_train_cnn.py
 
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import sys
 import tensorflow as tf
-from tensorflow import keras
 import argparse
 import time
-import h5py
+import numpy as np
 
 # Import your modules
 from models import build_cnn
@@ -19,13 +15,10 @@ from evaluation import (
     TimingCallback,
     log_timing_info
 )
-from csnecg_data_preprocessing import prepare_csnecg_data
+# Import functions from csnecg_data_preprocessing.py
+from csnecg_data_preprocessing import load_data_numpy, prepare_data_for_training
 
 def main(time_steps, batch_size):
-    # Enable mixed precision
-    policy = tf.keras.mixed_precision.Policy('mixed_float16')
-    tf.keras.mixed_precision.set_global_policy(policy)
-    
     # Set up base path for OUTPUTS on Google Drive
     base_path = '/content/drive/MyDrive/'
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
@@ -44,52 +37,32 @@ def main(time_steps, batch_size):
         'dropout_rates': [0.3, 0.3, 0.3, 0.3],
     }
 
-    # Prepare data with optimized memory usage
-    peaks_per_signal = 1
-    (
-        train_dataset,
-        valid_dataset,
-        test_dataset,
-        num_classes,
-        label_names,
-        Num2Label,
-        steps_per_epoch,
-        validation_steps,
-        test_steps
-    ) = prepare_csnecg_data(
-        base_path='.',
-        batch_size=batch_size,
-        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    # Load data
+    data_dir = 'csnecg_preprocessed_data'
+    X, Y, label_names = load_data_numpy(data_dir)
+    num_classes = Y.shape[1]
+
+    # Prepare data
+    train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps = prepare_data_for_training(
+        X, Y, batch_size=batch_size
     )
-    
-    # Enable prefetching and parallel processing
-    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
-    valid_dataset = valid_dataset.prefetch(tf.data.AUTOTUNE)
-    test_dataset = test_dataset.prefetch(tf.data.AUTOTUNE)
-    
-    # Build model with mixed precision
+
+    # Build model
     model = build_cnn(
         input_shape=(time_steps, 12),
         num_classes=num_classes,
         activation='sigmoid',
         **model_params
     )
-    
-    # Use AMP-optimized optimizer
-    optimizer = tf.keras.optimizers.Adam(learning_rate)
-    optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
-    
-    # Compile the model
+
     model.compile(
         loss='binary_crossentropy',
-        optimizer=optimizer,
+        optimizer=tf.keras.optimizers.Adam(learning_rate),
         metrics=['accuracy']
     )
 
-    # Create timing callback
+    # Callbacks
     timing_callback = TimingCallback()
-    
-    # Add timing callback to the callbacks list
     callbacks = [
         CustomProgressBar(),
         timing_callback,
@@ -105,14 +78,6 @@ def main(time_steps, batch_size):
         )
     ]
 
-    # Add memory tracking callback
-    class MemoryCallback(tf.keras.callbacks.Callback):
-        def on_epoch_end(self, epoch, logs=None):
-            memory = tf.config.experimental.get_memory_info('GPU:0')
-            print(f"\nGPU Memory: {memory['peak'] / 1e9:.2f} GB")
-    
-    callbacks.append(MemoryCallback())
-    
     # Train the model
     print("\nStarting model training...")
     training_start = time.time()

@@ -175,7 +175,7 @@ csnecg_segments_10peaks.hdf5
 csnecg_segments.hdf5
 
 # old code
-csn_ecg_code/
+legacy_scripts/
 
 # output plots
 output_plots/

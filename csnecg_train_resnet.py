@@ -1,18 +1,11 @@
 # csnecg_train_resnet.py
 
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import sys
 import tensorflow as tf
-from tensorflow import keras
 import argparse
 import time
-import h5py
-
-# Add the directory containing your modules to the Python path
-sys.path.append('/content/ecg-thesis')
+import numpy as np
 
 # Import your modules
 from models import build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
@@ -22,7 +15,8 @@ from evaluation import (
     TimingCallback,
     log_timing_info
 )
-from csnecg_data_preprocessing import prepare_csnecg_data
+# Import functions from csnecg_data_preprocessing.py
+from csnecg_data_preprocessing import load_data_numpy, prepare_data_for_training
 
 def main(time_steps, batch_size, resnet_type):
     # Set up base path for OUTPUTS on Google Drive
@@ -35,30 +29,21 @@ def main(time_steps, batch_size, resnet_type):
 
     learning_rate = 1e-3
 
-    # Define model parameters
     model_params = {
         'l2_reg': 0.001,
     }
 
-    # Prepare data - using current directory for HDF5 file
-    peaks_per_signal = 1
-    (
-        train_dataset,
-        valid_dataset,
-        test_dataset,
-        num_classes,
-        label_names,
-        Num2Label,
-        steps_per_epoch,
-        validation_steps,
-        test_steps
-    ) = prepare_csnecg_data(
-        base_path='.',
-        batch_size=batch_size,
-        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    # Load data
+    data_dir = 'csnecg_preprocessed_data'
+    X, Y, label_names = load_data_numpy(data_dir)
+    num_classes = Y.shape[1]
+
+    # Prepare data
+    train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps = prepare_data_for_training(
+        X, Y, batch_size=batch_size
     )
 
-    # Build the ResNet model based on the specified type
+    # Build the ResNet model
     if resnet_type == 'resnet18':
         model = build_resnet18_1d(
             input_shape=(time_steps, 12),
@@ -90,10 +75,8 @@ def main(time_steps, batch_size, resnet_type):
         metrics=['accuracy']
     )
 
-    # Create timing callback
+    # Callbacks
     timing_callback = TimingCallback()
-    
-    # Add timing callback to the callbacks list
     callbacks = [
         CustomProgressBar(),
         timing_callback,
@@ -119,7 +102,8 @@ def main(time_steps, batch_size, resnet_type):
         steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
         validation_steps=validation_steps,
-        callbacks=callbacks
+        callbacks=callbacks,
+        verbose=1
     )
     
     training_end = time.time()
@@ -131,7 +115,11 @@ def main(time_steps, batch_size, resnet_type):
     print("\nGenerating predictions for test set...")
     test_timing = {}
     start_time = time.time()
-    y_pred = model.predict(test_dataset)
+    y_pred = model.predict(
+        test_dataset,
+        steps=test_steps,
+        verbose=1
+    )
     end_time = time.time()
     test_timing['Test'] = end_time - start_time
     print(f"Test set prediction time: {test_timing['Test']:.2f} seconds")

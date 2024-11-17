@@ -1,23 +1,11 @@
 # csnecg_train_transformer.py
 
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import sys
 import tensorflow as tf
-from tensorflow import keras
 import argparse
 import time
-import h5py
-
-# Remove mixed precision policy for now
-# from keras import mixed_precision
-# policy = mixed_precision.Policy('mixed_float16')
-# mixed_precision.set_global_policy(policy)
-
-# Add the directory containing your modules to the Python path
-sys.path.append('/content/ecg-thesis')
+import numpy as np
 
 # Import your modules
 from models import build_transformer
@@ -27,7 +15,8 @@ from evaluation import (
     TimingCallback,
     log_timing_info
 )
-from csnecg_data_preprocessing import prepare_csnecg_data
+# Import functions from csnecg_data_preprocessing.py
+from csnecg_data_preprocessing import load_data_numpy, prepare_data_for_training
 
 def main(time_steps, batch_size):
     # Set up base path for OUTPUTS on Google Drive
@@ -37,19 +26,6 @@ def main(time_steps, batch_size):
     model_type = 'transformer'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
-
-    # Calculate dataset sizes from local HDF5
-    peaks_per_signal = 1
-    with h5py.File(f'csnecg_segments_{peaks_per_signal}peaks.hdf5', 'r') as f:
-        total_size = f['segments'].shape[0]
-        train_size = int(0.7 * total_size)
-        valid_size = int(0.15 * total_size)
-        test_size = total_size - train_size - valid_size
-
-    # Calculate steps correctly
-    steps_per_epoch = train_size // batch_size
-    validation_steps = valid_size // batch_size
-    test_steps = test_size // batch_size
 
     # Define model parameters
     model_params = {
@@ -62,21 +38,16 @@ def main(time_steps, batch_size):
         'dropout': 0.25,
     }
 
-    # Prepare data - using current directory for HDF5 file
-    (
-        train_dataset,
-        valid_dataset,
-        test_dataset,
-        num_classes,
-        label_names,
-        Num2Label,
-        steps_per_epoch,
-        validation_steps,
-        test_steps
-    ) = prepare_csnecg_data(
-        base_path='.',
-        batch_size=batch_size,
-        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    learning_rate = 1e-4
+
+    # Load data
+    data_dir = 'csnecg_preprocessed_data'
+    X, Y, label_names = load_data_numpy(data_dir)
+    num_classes = Y.shape[1]
+
+    # Prepare data
+    train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps = prepare_data_for_training(
+        X, Y, batch_size=batch_size
     )
 
     # Build the Transformer model
@@ -87,19 +58,15 @@ def main(time_steps, batch_size):
         **model_params
     )
 
-    # Compile the model without mixed precision optimizer
-    optimizer = tf.keras.optimizers.Adam(1e-4)
-
+    # Compile the model
     model.compile(
         loss='binary_crossentropy',
-        optimizer=optimizer,
+        optimizer=tf.keras.optimizers.Adam(learning_rate),
         metrics=['accuracy']
     )
 
-    # Create timing callback
+    # Callbacks
     timing_callback = TimingCallback()
-
-    # Add timing callback to the callbacks list
     callbacks = [
         CustomProgressBar(),
         timing_callback,
@@ -118,16 +85,17 @@ def main(time_steps, batch_size):
     # Train the model
     print("\nStarting model training...")
     training_start = time.time()
-
+    
     history = model.fit(
         train_dataset,
         epochs=30,
         steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
         validation_steps=validation_steps,
-        callbacks=callbacks
+        callbacks=callbacks,
+        verbose=1
     )
-
+    
     training_end = time.time()
     total_training_time = training_end - training_start
     print(f"\nTotal training time: {total_training_time:.2f} seconds")
@@ -137,7 +105,11 @@ def main(time_steps, batch_size):
     print("\nGenerating predictions for test set...")
     test_timing = {}
     start_time = time.time()
-    y_pred = model.predict(test_dataset)
+    y_pred = model.predict(
+        test_dataset,
+        steps=test_steps,
+        verbose=1
+    )
     end_time = time.time()
     test_timing['Test'] = end_time - start_time
     print(f"Test set prediction time: {test_timing['Test']:.2f} seconds")
