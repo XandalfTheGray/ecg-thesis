@@ -16,18 +16,40 @@ from evaluation import (
     log_timing_info
 )
 # Import functions from csnecg_data_preprocessing.py
-from csnecg_data_preprocessing import load_data_numpy, prepare_data_for_training
+from csnecg_data_preprocessing import load_data_numpy, prepare_data_for_training, ensure_data_available
 
-def main(time_steps, batch_size):
+def main(time_steps, batch_size, peaks_per_signal=1):
     # Set up base path for OUTPUTS on Google Drive
     base_path = '/content/drive/MyDrive/'
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'cnn'
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
+    output_dir = os.path.join(
+        base_output_dir, 
+        f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch"
+    )
     os.makedirs(output_dir, exist_ok=True)
     
     learning_rate = 1e-3
+
+    # Define Google Drive data directory
+    drive_data_dir = os.path.join(base_path, 'csnecg_preprocessed_data_zipped')
+
+    # Local data directory
+    local_data_dir = 'csnecg_preprocessed_data'
+
+    # Ensure data is available
+    ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal)
+
+    # Load data with peaks_per_signal
+    data_dir = local_data_dir
+    X, Y, label_names = load_data_numpy(data_dir, peaks_per_signal)
+    num_classes = Y.shape[1]
+
+    # Prepare data
+    train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps = prepare_data_for_training(
+        X, Y, batch_size=batch_size
+    )
 
     # Define model parameters
     model_params = {
@@ -36,16 +58,6 @@ def main(time_steps, batch_size):
         'kernel_sizes': [5, 5, 5],
         'dropout_rates': [0.3, 0.3, 0.3, 0.3],
     }
-
-    # Load data
-    data_dir = 'csnecg_preprocessed_data'
-    X, Y, label_names = load_data_numpy(data_dir)
-    num_classes = Y.shape[1]
-
-    # Prepare data
-    train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps = prepare_data_for_training(
-        X, Y, batch_size=batch_size
-    )
 
     # Build model
     model = build_cnn(
@@ -150,9 +162,9 @@ def main(time_steps, batch_size):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a CNN model on the preprocessed CSN ECG dataset.')
-    parser.add_argument('--time_steps', type=int, default=300, 
-                        help='Number of time steps in the preprocessed data (default: 300).')
-    parser.add_argument('--batch_size', type=int, default=128, 
-                        help='Batch size for training (default: 128)')
+    parser.add_argument('--time_steps', type=int, default=300)
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--peaks_per_signal', type=int, default=1,
+                      help='Number of peaks per signal (default: 1)')
     args, unknown = parser.parse_known_args()
-    main(args.time_steps, args.batch_size)
+    main(args.time_steps, args.batch_size, args.peaks_per_signal)

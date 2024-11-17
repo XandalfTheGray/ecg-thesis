@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
+import zipfile
+import shutil
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -233,24 +235,35 @@ def process_ecg_records(database_path, data_entries, snomed_ct_mapping, peaks_pe
 
     return X, Y, diagnosis_counts
 
-def save_data(X, Y, label_names_list, output_dir):
+def save_data(X, Y, label_names_list, output_dir, peaks_per_signal):
     """
-    Save preprocessed data to disk.
+    Save preprocessed data to disk in a compressed format, organized by peaks_per_signal.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    # Create directory structure: csnecg_preprocessed_data/peaks_N/
+    specific_dir = os.path.join(output_dir, f'peaks_{peaks_per_signal}')
+    os.makedirs(specific_dir, exist_ok=True)
+    
+    # Save arrays in compressed format
     X = np.array(X, dtype=np.float32)
-    np.save(os.path.join(output_dir, 'X.npy'), X)
-    np.save(os.path.join(output_dir, 'Y.npy'), Y)
-    np.save(os.path.join(output_dir, 'label_names.npy'), label_names_list)
-    logging.info(f"Saved preprocessed data to '{output_dir}'")
+    np.savez_compressed(os.path.join(specific_dir, 'X.npz'), X)
+    np.savez_compressed(os.path.join(specific_dir, 'Y.npz'), Y)
+    np.savez_compressed(os.path.join(specific_dir, 'label_names.npz'), label_names_list)
+    
+    logging.info(f"Saved compressed data to '{specific_dir}'")
 
-def load_data_numpy(data_dir):
+def load_data_numpy(data_dir, peaks_per_signal):
     """
     Load preprocessed data from disk.
     """
-    X = np.load(os.path.join(data_dir, 'X.npy'))
-    Y = np.load(os.path.join(data_dir, 'Y.npy'))
-    label_names = np.load(os.path.join(data_dir, 'label_names.npy'))
+    specific_dir = os.path.join(data_dir, f'peaks_{peaks_per_signal}')
+    
+    with np.load(os.path.join(specific_dir, 'X.npz')) as data:
+        X = data['arr_0']
+    with np.load(os.path.join(specific_dir, 'Y.npz')) as data:
+        Y = data['arr_0']
+    with np.load(os.path.join(specific_dir, 'label_names.npz')) as data:
+        label_names = data['arr_0']
+    
     return X, Y, label_names
 
 def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=128):
@@ -293,6 +306,41 @@ def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=12
     test_steps = len(Y_test) // batch_size
 
     return train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps
+
+def ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal):
+    """
+    Ensure that the preprocessed data is available in the local directory.
+    If not, copy it from Google Drive and unzip it.
+    """
+    # Check if data already exists in local directory
+    specific_dir = os.path.join(local_data_dir, f'peaks_{peaks_per_signal}')
+    if os.path.exists(specific_dir):
+        print(f"Data already available in {specific_dir}")
+        return
+
+    # Construct the path to the zipped data in Google Drive
+    zip_file_name = f'peaks_{peaks_per_signal}.zip'
+    zip_file_path = os.path.join(drive_data_dir, zip_file_name)
+
+    if not os.path.exists(zip_file_path):
+        raise FileNotFoundError(f"Zipped data not found at {zip_file_path}")
+
+    # Create local data directory if it doesn't exist
+    os.makedirs(local_data_dir, exist_ok=True)
+
+    # Copy the zipped file from Google Drive to local directory
+    local_zip_path = os.path.join(local_data_dir, zip_file_name)
+    print(f"Copying data from Google Drive to {local_zip_path}...")
+    shutil.copy(zip_file_path, local_zip_path)
+
+    # Unzip the data
+    print(f"Unzipping data to {local_data_dir}...")
+    with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
+        zip_ref.extractall(local_data_dir)
+
+    # Remove the zipped file to save space
+    os.remove(local_zip_path)
+    print("Data preparation completed.")
 
 def main():
     # Define paths
@@ -346,7 +394,7 @@ def main():
 
     # Save data to disk
     output_dir = 'csnecg_preprocessed_data'
-    save_data(X, Y_binarized, label_names_list, output_dir)
+    save_data(X, Y_binarized, label_names_list, output_dir, peaks_per_signal)
 
 if __name__ == '__main__':
     main()
