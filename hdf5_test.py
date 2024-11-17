@@ -8,24 +8,35 @@ import tensorflow as tf
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def inspect_hdf5_file(hdf5_file_path):
-    print(f"Inspecting HDF5 file: {hdf5_file_path}")
-    with h5py.File(hdf5_file_path, 'r') as hdf5_file:
+    """Detailed inspection of HDF5 file contents"""
+    print(f"\nInspecting HDF5 file: {hdf5_file_path}")
+    with h5py.File(hdf5_file_path, 'r') as f:
+        # Print basic structure
         print("\nDatasets in the HDF5 file:")
-        for key in hdf5_file.keys():
-            print(f" - {key}")
+        for key in f.keys():
+            print(f" - {key}: {f[key].shape}")
         
-        print("\nAttributes in the HDF5 file:")
-        for attr in hdf5_file.attrs:
-            print(f" - {attr}: {hdf5_file.attrs[attr]}")
+        # Examine segments
+        segments = f['segments']
+        print(f"\nSegments shape: {segments.shape}")
+        print(f"Segments dtype: {segments.dtype}")
         
-        segments_shape = hdf5_file['segments'].shape
-        labels_shape = hdf5_file['labels'].shape
-        label_names = [name.decode('utf-8') for name in hdf5_file['label_names'][()]]
+        # Examine labels
+        labels = f['labels']
+        print(f"\nLabels shape: {labels.shape}")
+        print(f"Labels dtype: {labels.dtype}")
         
-        print(f"\nSegments shape: {segments_shape}")
-        print(f"Labels shape: {labels_shape}")
-        print(f"Number of classes: {len(label_names)}")
+        # Examine label names
+        label_names = [name.decode('utf-8') for name in f['label_names'][()]]
+        print(f"\nNumber of unique labels: {len(label_names)}")
         print(f"Label names: {label_names}")
+        
+        # Check first few samples
+        print("\nFirst 5 samples:")
+        for i in range(min(5, len(labels))):
+            label_indices = labels[i]
+            label_list = [label_names[idx] for idx in label_indices]
+            print(f"Sample {i}: Labels = {label_list}")
 
 def visualize_samples(hdf5_file_path, num_samples=5):
     print(f"\nVisualizing {num_samples} samples from HDF5 file: {hdf5_file_path}")
@@ -54,7 +65,7 @@ def test_data_loading(base_path, batch_size=128, max_samples=1000):
     print("\nTesting data loading using 'prepare_csnecg_data' function...")
     try:
         train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csnecg_data(
-            base_path=base_path, batch_size=batch_size, hdf5_file_path='csnecg_segments.hdf5', max_samples=max_samples
+            base_path=base_path, batch_size=batch_size, hdf5_file_path='csnecg_segments_10peaks.hdf5', max_samples=max_samples
         )
         print(f"Number of classes: {num_classes}")
         print(f"Label names: {label_names}")
@@ -118,7 +129,7 @@ def test_training_run(base_path, batch_size=128, max_samples=1000):
 
 def main():
     # Update paths to match your environment
-    hdf5_file_path = 'csnecg_segments.hdf5'
+    hdf5_file_path = 'csnecg_segments_10peaks.hdf5'
     base_path = '.'  # Current directory where the csnecg_preprocessed_data folder is located
     batch_size = 128
     max_samples = 1000  # Limit to 1000 samples for testing

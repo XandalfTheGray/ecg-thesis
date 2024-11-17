@@ -305,66 +305,69 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
         logging.error(f"Critical error in process_and_save_segments: {str(e)}")
         raise
 
-def load_preprocessed_data(base_path, hdf5_file_path='csnecg_segments.hdf5', max_samples=None):
-    """Load data from HDF5 file into memory."""
-    file_path = os.path.join(base_path, hdf5_file_path)
-    
-    with h5py.File(file_path, 'r') as f:
-        # Load everything into memory at once
-        segments = f['segments'][:]  # Load all segments
-        labels = f['labels'][:]      # Load all labels
+def load_preprocessed_data_generator(hdf5_file_path):
+    """Generator function to yield samples from HDF5 file."""
+    with h5py.File(hdf5_file_path, 'r') as f:
+        segments = f['segments']
+        labels = f['labels']
         label_names = [name.decode('utf-8') for name in f['label_names'][()]]
         num_classes = len(label_names)
+        num_samples = segments.shape[0]
+        
+        for i in range(num_samples):
+            X_sample = segments[i]  # Shape: (300, 12)
+            y_indices = labels[i]
+            
+            # Convert label indices to multilabel format
+            y_multilabel = np.zeros(num_classes)
+            y_multilabel[y_indices] = 1  # Set the indices to 1
+            
+            yield X_sample, y_multilabel
 
-        if max_samples is not None:
-            segments = segments[:max_samples]
-            labels = labels[:max_samples]
-
-        # Convert labels to dense tensor
-        labels_tensor = tf.ragged.constant(labels).to_tensor()
-
-    # Create dataset from memory
-    dataset = tf.data.Dataset.from_tensor_slices((segments, labels_tensor))
-    
-    return dataset, num_classes, label_names
-
-def prepare_csnecg_data(base_path, batch_size=128, hdf5_file_path='csnecg_segments.hdf5', max_samples=None):
-    """
-    Prepare CSN ECG data for model training by loading from HDF5.
-
-    Returns:
-    - train_dataset: TensorFlow dataset for training
-    - valid_dataset: TensorFlow dataset for validation
-    - test_dataset: TensorFlow dataset for testing
-    - num_classes: Number of classes
-    - label_names: List of label names
-    - Num2Label: Dictionary mapping indices to label names
-    """
+def prepare_csnecg_data(
+    base_path, batch_size=128, hdf5_file_path='csnecg_segments.hdf5', max_samples=None
+):
+    """Prepare CSN ECG data for model training using a generator."""
     try:
-        logging.info("Loading data from HDF5...")
-        dataset, num_classes, label_names = load_preprocessed_data(base_path, hdf5_file_path, max_samples)
-
-        # Get total size
-        with h5py.File(os.path.join(base_path, hdf5_file_path), 'r') as f:
+        logging.info("Preparing data using generator...")
+        file_path = os.path.join(base_path, hdf5_file_path)
+        
+        # Get metadata from HDF5 file
+        with h5py.File(file_path, 'r') as f:
             total_size = f['segments'].shape[0]
-            if max_samples is not None:
-                total_size = min(max_samples, total_size)
-
-        # Calculate split sizes
+            label_names = [name.decode('utf-8') for name in f['label_names'][()]]
+            num_classes = len(label_names)
+        
+        # Calculate correct split sizes
         train_size = int(0.7 * total_size)
         valid_size = int(0.15 * total_size)
         test_size = total_size - train_size - valid_size
-
-        # Create the datasets with shuffling, batching, and repeating
-        train_dataset = dataset.take(train_size).shuffle(buffer_size=10000).batch(batch_size).repeat()
+        
+        # Create dataset from generator
+        dataset = tf.data.Dataset.from_generator(
+            lambda: load_preprocessed_data_generator(file_path),
+            output_types=(tf.float32, tf.float32),
+            output_shapes=((300, 12), (num_classes,))
+        )
+        
+        # Shuffle the dataset
+        dataset = dataset.shuffle(buffer_size=10000)
+        
+        # Split the dataset
+        train_dataset = dataset.take(train_size)
         remaining = dataset.skip(train_size)
-        valid_dataset = remaining.take(valid_size).batch(batch_size).repeat()
-        test_dataset = remaining.skip(valid_size).batch(batch_size)
-
+        valid_dataset = remaining.take(valid_size)
+        test_dataset = remaining.skip(valid_size)
+        
+        # Batch the datasets
+        train_dataset = train_dataset.batch(batch_size).repeat()
+        valid_dataset = valid_dataset.batch(batch_size).repeat()
+        test_dataset = test_dataset.batch(batch_size)
+        
         # Create Num2Label mapping
         Num2Label = {idx: label for idx, label in enumerate(label_names)}
-
-        logging.info(f"Data loaded: Train={train_size}, Valid={valid_size}, Test={test_size}")
+        
+        logging.info(f"Data prepared: Train={train_size}, Valid={valid_size}, Test={test_size}")
         return (
             train_dataset,
             valid_dataset,

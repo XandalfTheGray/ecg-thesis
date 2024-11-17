@@ -101,13 +101,7 @@ def main(time_steps, batch_size):
         )
     ]
 
-    # Calculate train and validation sizes from the dataset info
-    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
-        total_size = f['segments'].shape[0]
-        train_size = int(0.7 * total_size)
-        valid_size = int(0.15 * total_size)
-
-    # Calculate steps
+    # Calculate steps per epoch
     steps_per_epoch = train_size // batch_size
     validation_steps = valid_size // batch_size
 
