@@ -170,7 +170,8 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
         total_records = len(data_entries)
         
         # Create HDF5 filename with peaks_per_signal
-        hdf5_file_path = f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+        base_path = '/content/drive/MyDrive/'
+        hdf5_file_path = os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5')
         
         with h5py.File(hdf5_file_path, 'w') as hdf5_file:
             # Create dataset placeholders with max shape
