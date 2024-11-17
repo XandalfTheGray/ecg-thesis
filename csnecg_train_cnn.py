@@ -21,8 +21,10 @@ from evaluation import (
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
-    # Set up output directories for local execution
-    base_output_dir = 'csnecg_output_plots'
+    # Set up base path for data on Google Drive
+    base_path = '/content/drive/MyDrive/'
+    # Set up output directories
+    base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'cnn'
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
@@ -48,7 +50,7 @@ def main(time_steps, batch_size):
         label_names,
         Num2Label,
     ) = prepare_csnecg_data(
-        base_path='.',  # Current directory
+        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )

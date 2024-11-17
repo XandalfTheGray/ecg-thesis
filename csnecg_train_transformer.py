@@ -29,8 +29,9 @@ from evaluation import (
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def main(time_steps, batch_size):
-    # Set up output directories
+    # Set up base path for data on Google Drive
     base_path = '/content/drive/MyDrive/'
+    # Set up output directories
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'transformer'
