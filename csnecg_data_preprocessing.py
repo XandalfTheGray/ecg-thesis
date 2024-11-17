@@ -293,8 +293,8 @@ def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=12
     num_samples_test = X_test.shape[0]
     X_test_scaled = scaler.transform(X_test.reshape(-1, num_channels)).reshape(num_samples_test, num_timesteps, num_channels)
 
-    # Create TensorFlow datasets
-    train_dataset = tf.data.Dataset.from_tensor_slices((X_train_scaled, Y_train)).shuffle(buffer_size=1024).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    # Create TensorFlow datasets with repeat for training
+    train_dataset = tf.data.Dataset.from_tensor_slices((X_train_scaled, Y_train)).shuffle(buffer_size=1024).batch(batch_size).repeat().prefetch(tf.data.AUTOTUNE)
     valid_dataset = tf.data.Dataset.from_tensor_slices((X_valid_scaled, Y_valid)).batch(batch_size).prefetch(tf.data.AUTOTUNE)
     test_dataset = tf.data.Dataset.from_tensor_slices((X_test_scaled, Y_test)).batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
@@ -303,7 +303,7 @@ def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=12
     validation_steps = len(Y_valid) // batch_size
     test_steps = len(Y_test) // batch_size
 
-    return train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps
+    return train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps, Y_test
 
 def ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal):
     """
