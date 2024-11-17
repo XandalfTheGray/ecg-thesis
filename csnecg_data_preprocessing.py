@@ -343,26 +343,28 @@ def prepare_csnecg_data(
         valid_size = int(0.15 * total_size)
         test_size = total_size - train_size - valid_size
         
-        # Create dataset from generator
+        # Create dataset from generator with prefetch
         dataset = tf.data.Dataset.from_generator(
             lambda: load_preprocessed_data_generator(file_path),
-            output_types=(tf.float32, tf.float32),
-            output_shapes=((300, 12), (num_classes,))
-        )
+            output_signature=(
+                tf.TensorSpec(shape=(300, 12), dtype=tf.float32),
+                tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
+            )
+        ).prefetch(tf.data.AUTOTUNE)
         
-        # Shuffle the dataset
-        dataset = dataset.shuffle(buffer_size=10000)
+        # Shuffle with a larger buffer
+        dataset = dataset.shuffle(buffer_size=min(50000, total_size))
         
         # Split the dataset
         train_dataset = dataset.take(train_size)
         remaining = dataset.skip(train_size)
         valid_dataset = remaining.take(valid_size)
-        test_dataset = remaining.skip(valid_size)
+        test_dataset = remaining.skip(valid_size).take(test_size)
         
-        # Batch the datasets
-        train_dataset = train_dataset.batch(batch_size).repeat()
-        valid_dataset = valid_dataset.batch(batch_size).repeat()
-        test_dataset = test_dataset.batch(batch_size)
+        # Batch and cache the datasets
+        train_dataset = train_dataset.batch(batch_size).cache().repeat()
+        valid_dataset = valid_dataset.batch(batch_size).cache().repeat()
+        test_dataset = test_dataset.batch(batch_size).cache()
         
         # Create Num2Label mapping
         Num2Label = {idx: label for idx, label in enumerate(label_names)}
@@ -382,10 +384,11 @@ def prepare_csnecg_data(
 
 def main():
     # Define paths
-    database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    base_path = '/content/drive/MyDrive/'
+    database_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                                 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                                 'WFDBRecords')
-    csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
+    csv_path = os.path.join(base_path, 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                             'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                             'ConditionNames_SNOMED-CT.csv')
 

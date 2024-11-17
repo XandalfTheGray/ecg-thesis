@@ -56,6 +56,18 @@ def main(time_steps, batch_size):
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
 
+    # Calculate dataset sizes correctly
+    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
+        total_size = f['segments'].shape[0]
+        train_size = int(0.7 * total_size)
+        valid_size = int(0.15 * total_size)
+        test_size = total_size - train_size - valid_size
+
+    # Calculate steps correctly
+    steps_per_epoch = train_size // batch_size
+    validation_steps = valid_size // batch_size
+    test_steps = test_size // batch_size
+
     # Build the CNN model
     model = build_cnn(
         input_shape=(time_steps, 12),
@@ -90,16 +102,6 @@ def main(time_steps, batch_size):
         )
     ]
 
-    # Calculate train and validation sizes from the dataset info
-    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
-        total_size = f['segments'].shape[0]
-        train_size = int(0.7 * total_size)
-        valid_size = int(0.15 * total_size)
-
-    # Calculate steps
-    steps_per_epoch = train_size // batch_size
-    validation_steps = valid_size // batch_size
-
     # Train the model
     print("\nStarting model training...")
     training_start = time.time()
@@ -110,7 +112,8 @@ def main(time_steps, batch_size):
         steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
         validation_steps=validation_steps,
-        callbacks=callbacks
+        callbacks=callbacks,
+        verbose=1
     )
     
     training_end = time.time()
@@ -122,7 +125,11 @@ def main(time_steps, batch_size):
     print("\nGenerating predictions for test set...")
     test_timing = {}
     start_time = time.time()
-    y_pred = model.predict(test_dataset)
+    y_pred = model.predict(
+        test_dataset,
+        steps=test_steps,
+        verbose=1
+    )
     end_time = time.time()
     test_timing['Test'] = end_time - start_time
     print(f"Test set prediction time: {test_timing['Test']:.2f} seconds")
