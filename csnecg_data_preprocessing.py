@@ -306,40 +306,25 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
         raise
 
 def load_preprocessed_data(base_path, hdf5_file_path='csnecg_segments.hdf5', max_samples=None):
-    """
-    Load preprocessed data from HDF5 file.
-    
-    Parameters:
-    - base_path: Base directory where the HDF5 file is located
-    - hdf5_file_path: Name of the HDF5 file
-    - max_samples: Maximum number of samples to load
-    """
+    """Load data from HDF5 file into memory."""
     file_path = os.path.join(base_path, hdf5_file_path)
     
-    # First, get the metadata
     with h5py.File(file_path, 'r') as f:
+        # Load everything into memory at once
+        segments = f['segments'][:]  # Load all segments
+        labels = f['labels'][:]      # Load all labels
         label_names = [name.decode('utf-8') for name in f['label_names'][()]]
         num_classes = len(label_names)
-        total_samples = f['segments'].shape[0]
+
         if max_samples is not None:
-            total_samples = min(max_samples, total_samples)
-    
-    def generator():
-        with h5py.File(file_path, 'r') as f:
-            for i in range(total_samples):
-                segment = f['segments'][i]
-                label_indices = f['labels'][i]
-                label_vector = np.zeros(num_classes, dtype=np.float32)
-                label_vector[label_indices] = 1.0
-                yield segment, label_vector
-    
-    dataset = tf.data.Dataset.from_generator(
-        generator,
-        output_signature=(
-            tf.TensorSpec(shape=(300, 12), dtype=tf.float32),
-            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
-        )
-    )
+            segments = segments[:max_samples]
+            labels = labels[:max_samples]
+
+        # Convert labels to dense tensor
+        labels_tensor = tf.ragged.constant(labels).to_tensor()
+
+    # Create dataset from memory
+    dataset = tf.data.Dataset.from_tensor_slices((segments, labels_tensor))
     
     return dataset, num_classes, label_names
 
@@ -370,11 +355,10 @@ def prepare_csnecg_data(base_path, batch_size=128, hdf5_file_path='csnecg_segmen
         valid_size = int(0.15 * total_size)
         test_size = total_size - train_size - valid_size
 
-        # Create the datasets with shuffling and batching
-        dataset = dataset.shuffle(buffer_size=10000, reshuffle_each_iteration=False)
-        train_dataset = dataset.take(train_size).batch(batch_size)
+        # Create the datasets with shuffling, batching, and repeating
+        train_dataset = dataset.take(train_size).shuffle(buffer_size=10000).batch(batch_size).repeat()
         remaining = dataset.skip(train_size)
-        valid_dataset = remaining.take(valid_size).batch(batch_size)
+        valid_dataset = remaining.take(valid_size).batch(batch_size).repeat()
         test_dataset = remaining.skip(valid_size).batch(batch_size)
 
         # Create Num2Label mapping
