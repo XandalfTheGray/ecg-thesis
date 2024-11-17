@@ -257,13 +257,10 @@ def load_data_numpy(data_dir, peaks_per_signal):
     """
     specific_dir = os.path.join(data_dir, f'peaks_{peaks_per_signal}')
     
-    # Load with allow_pickle=True for label_names
-    with np.load(os.path.join(specific_dir, 'X.npy')) as data:
-        X = data['arr_0']
-    with np.load(os.path.join(specific_dir, 'Y.npy')) as data:
-        Y = data['arr_0']
-    with np.load(os.path.join(specific_dir, 'label_names.npy'), allow_pickle=True) as data:
-        label_names = data['arr_0']
+    # Load numpy arrays directly (no context manager needed for .npy files)
+    X = np.load(os.path.join(specific_dir, 'X.npy'))
+    Y = np.load(os.path.join(specific_dir, 'Y.npy'))
+    label_names = np.load(os.path.join(specific_dir, 'label_names.npy'), allow_pickle=True)
     
     return X, Y, label_names
 
