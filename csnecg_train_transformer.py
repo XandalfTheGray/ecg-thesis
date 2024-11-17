@@ -10,10 +10,6 @@ from tensorflow import keras
 import argparse
 import time
 
-# Mount Google Drive and set paths
-from google.colab import drive
-drive.mount('/content/drive')
-
 # Remove mixed precision policy for now
 # from keras import mixed_precision
 # policy = mixed_precision.Policy('mixed_float16')
