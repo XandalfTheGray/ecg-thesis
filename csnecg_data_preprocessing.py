@@ -247,25 +247,23 @@ def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, pe
                     
                     # Detect R-peaks
                     peaks = detect_r_peaks(ecg_data)
-                    if len(peaks) == 0:
-                        logging.warning(f"No R-peaks detected in record {record}")
-                        skipped_records += 1
-                        continue
                     
-                    # Limit peaks per signal
+                    # Use whatever peaks we found (even if less than peaks_per_signal)
                     if len(peaks) > peaks_per_signal:
-                        np.random.seed(42)  # For reproducibility
+                        np.random.seed(42)
                         peaks = np.random.choice(peaks, peaks_per_signal, replace=False)
-                        peaks.sort()  # Keep peaks in order
+                        peaks.sort()
                     
-                    # Segment signals
-                    segments, _ = segment_signal(ecg_data, peaks, valid_classes)
+                    # Segment signals (will handle case of no peaks internally)
+                    segments, valid_labels = segment_signal(ecg_data, peaks, valid_classes)
+                    
+                    # Only skip if no segments were created
                     if segments.size == 0:
                         logging.warning(f"No valid segments extracted from record {record}")
                         skipped_records += 1
                         continue
                     
-                    # Append segments and labels to HDF5 datasets
+                    # Save whatever segments we got
                     num_new_segments = segments.shape[0]
                     segments_dataset.resize(segments_dataset.shape[0] + num_new_segments, axis=0)
                     segments_dataset[-num_new_segments:] = segments.astype(np.float32)
