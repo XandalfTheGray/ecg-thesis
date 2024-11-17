@@ -84,7 +84,7 @@ def main(time_steps, batch_size):
             monitor='val_loss', patience=10, restore_best_weights=True, verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, 'best_model.h5'),
+            filepath=os.path.join(output_dir, 'best_model.keras'),
             monitor='val_loss', save_best_only=True, verbose=1
         )
     ]
