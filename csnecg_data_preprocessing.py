@@ -1,16 +1,15 @@
 # csnecg_data_preprocessing.py
 
-import numpy as np
 import os
 import random
+import numpy as np
 from scipy.io import loadmat
 import wfdb
 import logging
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, MultiLabelBinarizer
+from sklearn.preprocessing import MultiLabelBinarizer
 from collections import Counter
+import h5py
 import tensorflow as tf
 
 # Set up logging
@@ -53,306 +52,352 @@ def extract_snomed_ct_codes(header):
         logging.warning(f"No Dx field found in header comments: {header.comments}")
     return codes
 
-def pad_ecg_data(ecg_data, desired_length):
+def filter_ecg(signal, fs=500, lowcut=0.5, highcut=50.0):
     """
-    Pad or truncate ECG data to a fixed number of time steps.
-    """
-    current_length = ecg_data.shape[0]
-    if current_length < desired_length:
-        padding = np.zeros((desired_length - current_length, ecg_data.shape[1]))
-        ecg_padded = np.vstack((ecg_data, padding))
-    else:
-        ecg_padded = ecg_data[:desired_length, :]
-    return ecg_padded
-
-def plot_ecg_signal(ecg_signal, record_name, plot_dir, class_names):
-    """
-    Plot and save an ECG signal.
-    """
-    plt.figure(figsize=(15, 5))
-    for lead in range(ecg_signal.shape[1]):
-        plt.plot(ecg_signal[:, lead], label=f'Lead {lead+1}')
-    class_label = ', '.join(class_names)
-    plt.title(f'ECG Signal for Record: {record_name} | Classes: {class_label}')
-    plt.xlabel('Time Steps')
-    plt.ylabel('Amplitude')
-    plt.legend(loc='upper right', ncol=4, fontsize='small')
-    plt.tight_layout()
+    Apply bandpass filter to ECG signal.
     
-    # Create the plot directory if it doesn't exist
-    os.makedirs(plot_dir, exist_ok=True)
+    Parameters:
+    - signal: Raw ECG signal
+    - fs: Sampling frequency (Hz)
+    - lowcut: Lower frequency bound (Hz)
+    - highcut: Upper frequency bound (Hz)
     
-    # Save the plot with a simplified filename
-    simplified_name = record_name.replace('\\', '_').replace('/', '_')
-    plt.savefig(os.path.join(plot_dir, f'{simplified_name}.png'))
-    plt.close()
+    Returns:
+    - Filtered signal
+    """
+    from scipy.signal import butter, filtfilt
+    nyquist = fs / 2
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    b, a = butter(2, [low, high], btype='band')
+    return filtfilt(b, a, signal)
 
-def load_data(database_path, data_entries, snomed_ct_mapping, max_records=None, desired_lengths=[500, 1000, 2000], num_plots_per_class=1, plot_dir='output_plots/class_ecg_plots/'):
+def detect_r_peaks(ecg_data, distance=50, fs=500):
     """
-    Load and preprocess ECG data from the CSN dataset and save to disk.
+    Detect R-peaks using multiple leads with filtering for more robust detection.
+    
+    Parameters:
+    - ecg_data: 12-lead ECG data (timesteps, 12)
+    - distance: Minimum distance between peaks
+    - fs: Sampling frequency in Hz
+    
+    Returns:
+    - peaks: Array of R-peak locations
     """
-    for desired_length in desired_lengths:
-        X, Y_cl = [], []
-        processed_records = 0
-        skipped_records = 0
-        diagnosis_counts = {}
-        no_code_count = 0
-        plotted_classes = set()
+    from scipy.signal import find_peaks
+    
+    # Use leads I, II, and V1-V6 for peak detection
+    important_leads = [0, 1, 6, 7, 8, 9, 10, 11]  # Leads I, II, V1-V6
+    
+    all_peaks = []
+    for lead_idx in important_leads:
+        # Filter the signal
+        filtered_signal = filter_ecg(ecg_data[:, lead_idx], fs=fs)
         
-        if not os.path.exists(plot_dir):
-            os.makedirs(plot_dir)
+        # Find peaks in filtered signal
+        peaks, _ = find_peaks(filtered_signal, 
+                              distance=distance,
+                              height=0.1,  # Minimum height for peaks
+                              prominence=0.2)  # Minimum prominence for peaks
+        all_peaks.append(peaks)
+    
+    # Find consensus peaks
+    peak_counts = {}
+    for lead_peaks in all_peaks:
+        for peak in lead_peaks:
+            # Allow for small variations in peak location between leads
+            for offset in range(-5, 6):
+                adjusted_peak = peak + offset
+                if 0 <= adjusted_peak < ecg_data.shape[0]:
+                    peak_counts[adjusted_peak] = peak_counts.get(adjusted_peak, 0) + 1
+    
+    # Keep peaks that appear in at least 3 leads
+    consensus_peaks = sorted([peak for peak, count in peak_counts.items() if count >= 3])
+    
+    return np.array(consensus_peaks)
+
+def segment_signal(signal, r_peaks, labels, window_size=300):
+    """
+    Segment the signal into fixed windows around R-peaks.
+    
+    Parameters:
+    - signal: The ECG signal array (samples x leads)
+    - r_peaks: Array of R-peak locations
+    - labels: Array of labels for each R-peaks
+    - window_size: Total window size (default 300: 150 before + 150 after R-peak)
+    
+    Returns:
+    - segments: Array of segmented signals
+    - valid_labels: Array of labels corresponding to each segment
+    """
+    if r_peaks is None or len(r_peaks) == 0:
+        logging.warning("No R-peaks provided for segmentation")
+        return np.array([]), np.array([])
         
-        logging.info(f"Starting to process data for {desired_length} time steps. Max records: {max_records}")
-        logging.info(f"Number of data entries: {len(data_entries)}")
+    pre_buffer = window_size // 2
+    post_buffer = window_size - pre_buffer
+    
+    segments = []
+    valid_labels = []
+    
+    for peak in r_peaks:
+        try:
+            # Check if we can extract a complete window
+            if peak - pre_buffer >= 0 and peak + post_buffer <= signal.shape[0]:
+                # Extract the window
+                segment = signal[peak - pre_buffer:peak + post_buffer]
+                segments.append(segment)
+                valid_labels.append(labels)  # Use the record's labels for each segment
+        except Exception as e:
+            logging.warning(f"Error processing segment at peak {peak}: {str(e)}")
+            continue
+    
+    return np.array(segments), np.array(valid_labels)
+
+def process_and_save_segments(database_path, data_entries, snomed_ct_mapping, peaks_per_signal=10, max_records=None):
+    """Process ECG records and save segments incrementally to an HDF5 file."""
+    processed_records = 0
+    skipped_records = 0
+    diagnosis_counts = {}
+    
+    try:
+        logging.info(f"Starting to process data. Max records: {max_records}, Peaks per signal: {peaks_per_signal}")
         
-        # Randomly sample records if max_records is specified
         if max_records is not None:
             random.seed(42)
             data_entries = random.sample(data_entries, min(max_records, len(data_entries)))
         
-        for i, record in enumerate(data_entries):
-            mat_file = os.path.join(database_path, record + '.mat')
-            hea_file = os.path.join(database_path, record + '.hea')
+        total_records = len(data_entries)
         
-            if not os.path.exists(mat_file) or not os.path.exists(hea_file):
-                logging.warning(f"Files not found for record {record}")
-                skipped_records += 1
-                continue
+        # Create HDF5 filename with peaks_per_signal
+        hdf5_file_path = f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
         
-            try:
-                # Load ECG data from .mat file
-                mat_data = loadmat(mat_file)
-                if 'val' not in mat_data:
-                    logging.warning(f"'val' key not found in mat file for record {record}")
-                    skipped_records += 1
-                    continue
-                ecg_data = mat_data['val']
-        
-                if ecg_data.ndim != 2:
-                    logging.warning(f"Unexpected ECG data dimensions for record {record}: {ecg_data.shape}")
-                    skipped_records += 1
-                    continue
-        
-                # Read the header file
+        with h5py.File(hdf5_file_path, 'w') as hdf5_file:
+            # Create dataset placeholders with max shape
+            segments_dataset = hdf5_file.create_dataset(
+                'segments',
+                shape=(0, 300, 12),
+                maxshape=(None, 300, 12),
+                chunks=True,
+                dtype=np.float32
+            )
+            labels_dataset = hdf5_file.create_dataset(
+                'labels',
+                shape=(0, ),
+                maxshape=(None, ),
+                dtype=h5py.special_dtype(vlen=np.dtype('int32'))
+            )
+            label_names_set = set()
+            
+            for i, record in enumerate(data_entries):
                 try:
+                    if i % 100 == 0:
+                        logging.info(f"Processing record {i}/{total_records}")
+                    
+                    mat_file = os.path.join(database_path, record + '.mat')
+                    hea_file = os.path.join(database_path, record + '.hea')
+                    
+                    if not os.path.exists(mat_file) or not os.path.exists(hea_file):
+                        logging.warning(f"Files not found for record {record}")
+                        skipped_records += 1
+                        continue
+                    
+                    # Load ECG data
+                    mat_data = loadmat(mat_file)
+                    if 'val' not in mat_data:
+                        logging.warning(f"'val' key not found in mat file for record {record}")
+                        skipped_records += 1
+                        continue
+                    ecg_data = mat_data['val'].T
+                    
+                    # Read the header file
                     record_header = wfdb.rdheader(os.path.join(database_path, record))
-                except ValueError as ve:
-                    logging.error(f"Error processing record {record}: {str(ve)}")
-                    skipped_records += 1
-                    continue
+                    
+                    # Extract SNOMED codes and map to labels
+                    snomed_codes = extract_snomed_ct_codes(record_header)
+                    valid_classes = []
+                    for code in snomed_codes:
+                        if code in snomed_ct_mapping:
+                            class_name = snomed_ct_mapping[code]
+                            valid_classes.append(class_name)
+                            diagnosis_counts[class_name] = diagnosis_counts.get(class_name, 0) + 1
+                        else:
+                            valid_classes.append('Other')
+                            diagnosis_counts['Other'] = diagnosis_counts.get('Other', 0) + 1
+                    
+                    # Remove duplicates and 'Other' if there are other valid classes
+                    valid_classes = list(set(valid_classes))
+                    if len(valid_classes) > 1 and 'Other' in valid_classes:
+                        valid_classes.remove('Other')
+                    
+                    # Update label names set
+                    label_names_set.update(valid_classes)
+                    
+                    # Detect R-peaks
+                    peaks = detect_r_peaks(ecg_data)
+                    if len(peaks) == 0:
+                        logging.warning(f"No R-peaks detected in record {record}")
+                        skipped_records += 1
+                        continue
+                    
+                    # Limit peaks per signal
+                    if len(peaks) > peaks_per_signal:
+                        np.random.seed(42)  # For reproducibility
+                        peaks = np.random.choice(peaks, peaks_per_signal, replace=False)
+                        peaks.sort()  # Keep peaks in order
+                    
+                    # Segment signals
+                    segments, _ = segment_signal(ecg_data, peaks, valid_classes)
+                    if segments.size == 0:
+                        logging.warning(f"No valid segments extracted from record {record}")
+                        skipped_records += 1
+                        continue
+                    
+                    # Append segments and labels to HDF5 datasets
+                    num_new_segments = segments.shape[0]
+                    segments_dataset.resize(segments_dataset.shape[0] + num_new_segments, axis=0)
+                    segments_dataset[-num_new_segments:] = segments.astype(np.float32)
+                    
+                    # Convert labels to integer indices
+                    labels_indices = []
+                    for _ in range(num_new_segments):
+                        indices = [sorted(label_names_set).index(lbl) for lbl in valid_classes]
+                        labels_indices.append(np.array(indices, dtype=np.int32))
+                    labels_dataset.resize(labels_dataset.shape[0] + num_new_segments, axis=0)
+                    labels_dataset[-num_new_segments:] = labels_indices
+                    
+                    processed_records += 1
+                    
+                    if max_records and processed_records >= max_records:
+                        break
+                        
                 except Exception as e:
-                    logging.error(f"Unexpected error processing record {record}: {str(e)}")
+                    logging.error(f"Error processing record {record}: {str(e)}")
                     skipped_records += 1
                     continue
+                
+                # Periodically save progress every 10,000 records
+                if processed_records % 10000 == 0 and processed_records > 0:
+                    try:
+                        temp_dir = 'csnecg_preprocessed_data_temp'
+                        os.makedirs(temp_dir, exist_ok=True)
+                        temp_hdf5_path = os.path.join(temp_dir, f'csnecg_segments_{processed_records}.hdf5')
+                        with h5py.File(temp_hdf5_path, 'w') as temp_hdf5:
+                            temp_hdf5.create_dataset('segments', data=segments.astype(np.float32))
+                            temp_hdf5.create_dataset('labels', data=labels_indices)
+                        logging.info(f"Saved temporary progress at {processed_records} records")
+                    except Exception as e:
+                        logging.error(f"Error saving temporary progress: {str(e)}")
         
-                # Extract SNOMED-CT codes from the header
-                snomed_ct_codes = extract_snomed_ct_codes(record_header)
-        
-                if not snomed_ct_codes:
-                    no_code_count += 1
-                    logging.warning(f"No SNOMED-CT codes found for record {record}")
-                    continue
-        
-                # Map SNOMED-CT codes to class names
-                valid_classes = []
-                for code in snomed_ct_codes:
-                    if code in snomed_ct_mapping:
-                        class_name = snomed_ct_mapping[code]
-                        valid_classes.append(class_name)
-                        diagnosis_counts[class_name] = diagnosis_counts.get(class_name, 0) + 1
-                    else:
-                        valid_classes.append('Other')
-                        diagnosis_counts['Other'] = diagnosis_counts.get('Other', 0) + 1
-        
-                # Remove duplicates and 'Other' if there are other valid classes
-                valid_classes = list(set(valid_classes))
-                if len(valid_classes) > 1 and 'Other' in valid_classes:
-                    valid_classes.remove('Other')
-        
-                # Pad or truncate ECG data to desired length
-                ecg_padded = pad_ecg_data(ecg_data.T, desired_length)
-                X.append(ecg_padded)
-                Y_cl.append(valid_classes)
-        
-                # Plot ECG signals for each class (up to num_plots_per_class)
-                for cls in valid_classes:
-                    if cls not in plotted_classes and list(Y_cl).count(cls) <= num_plots_per_class:
-                        plot_ecg_signal(ecg_padded, record, plot_dir, valid_classes)
-                        logging.info(f"Plotted ECG signal for class {cls} in record {record}")
-                        plotted_classes.add(cls)
-        
-                processed_records += 1
-        
-                if processed_records % 100 == 0:
-                    logging.info(f"Processed {processed_records} records")
-        
-                if max_records and processed_records >= max_records:
-                    break
-        
-            except Exception as e:
-                logging.error(f"Error processing record {record}: {str(e)}")
-                skipped_records += 1
-        
-        logging.info(f"Processed {processed_records} records")
-        logging.info(f"Skipped {skipped_records} records")
-        logging.info(f"Records with no SNOMED-CT codes: {no_code_count}")
-        logging.info(f"Diagnosis counts: {diagnosis_counts}")
-        
-        if len(X) == 0:
-            logging.error("No data was processed successfully")
-            continue
-        
-        # Convert lists to numpy arrays
-        X = np.array(X)
-        Y_cl = np.array(Y_cl, dtype=object)
-        
-        # Save preprocessed data to disk
-        preprocessed_data_dir = os.path.join('csnecg_preprocessed_data', f'{desired_length}_signal_time_steps')
-        os.makedirs(preprocessed_data_dir, exist_ok=True)
-        np.save(os.path.join(preprocessed_data_dir, 'X.npy'), X)
-        np.save(os.path.join(preprocessed_data_dir, 'Y.npy'), Y_cl)
-        logging.info(f"Saved preprocessed data to '{preprocessed_data_dir}' directory")
+            # Save label names
+            label_names_list = sorted(label_names_set)
+            hdf5_file.create_dataset('label_names', data=np.array(label_names_list, dtype='S'))
+            # Save mapping of labels to indices
+            label_to_index = {label: idx for idx, label in enumerate(label_names_list)}
+            hdf5_file.attrs['label_to_index'] = str(label_to_index)
+            
+            logging.info(f"Processed {processed_records} records")
+            logging.info(f"Skipped {skipped_records} records")
+            logging.info(f"Diagnosis counts: {diagnosis_counts}")
+            logging.info(f"Data saved to {hdf5_file_path}")
+            
+    except Exception as e:
+        logging.error(f"Critical error in process_and_save_segments: {str(e)}")
+        raise
 
-def load_preprocessed_data(time_steps, base_path):
+def load_preprocessed_data(base_path, hdf5_file_path='csnecg_segments.hdf5', max_samples=None):
     """
-    Load preprocessed data from disk.
+    Load preprocessed data from HDF5 file.
+    
+    Parameters:
+    - base_path: Base directory where the HDF5 file is located
+    - hdf5_file_path: Name of the HDF5 file
+    - max_samples: Maximum number of samples to load
     """
-    data_dir = os.path.join(base_path, 'csnecg_preprocessed_data', f'{time_steps}_signal_time_steps')
-    X = np.load(os.path.join(data_dir, 'X.npy'))
-    Y_cl = np.load(os.path.join(data_dir, 'Y.npy'), allow_pickle=True)
-    return X, Y_cl
-
-def prepare_labels(Y_cl):
-    """
-    Prepare labels for multi-label classification.
-    """
-    unique_classes = set(class_name for sublist in Y_cl for class_name in sublist)
-    mlb = MultiLabelBinarizer(classes=sorted(unique_classes))
-    Y_binarized = mlb.fit_transform(Y_cl)
-    label_names = mlb.classes_
-    Num2Label = {idx: label for idx, label in enumerate(label_names)}
-    label2Num = {label: idx for idx, label in enumerate(label_names)}
-    num_classes = len(label_names)
-    return Y_binarized, label_names, Num2Label, label2Num, num_classes
-
-def filter_data(X, Y_binarized):
-    """
-    Remove samples with no positive labels.
-    """
-    valid_samples = Y_binarized.sum(axis=1) > 0
-    X = X[valid_samples]
-    Y_binarized = Y_binarized[valid_samples]
-    return X, Y_binarized
-
-def remove_rare_combinations(X, Y_binarized, min_combination_count=2):
-    """
-    Remove samples with rare label combinations.
-    """
-    label_combinations = [tuple(row) for row in Y_binarized]
-    combination_counts = Counter(label_combinations)
-    valid_combinations = [comb for comb, count in combination_counts.items() if count >= min_combination_count]
-    valid_indices = [i for i, comb in enumerate(label_combinations) if comb in valid_combinations]
-    X = X[valid_indices]
-    Y_binarized = Y_binarized[valid_indices]
-    return X, Y_binarized
-
-def split_and_scale_data(X, Y_binarized, test_size=0.2, val_size=0.25):
-    """
-    Split the data into train, validation, and test sets, and scale the features.
-    """
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, Y_binarized, test_size=test_size, random_state=42
-    )
-    X_train, X_valid, y_train, y_valid = train_test_split(
-        X_train, y_train, test_size=val_size, random_state=42
-    )
-
-    scaler = StandardScaler()
-    X_train_scaled = scale_dataset(X_train, scaler)
-    X_valid_scaled = scale_dataset(X_valid, scaler)
-    X_test_scaled = scale_dataset(X_test, scaler)
-
-    return X_train_scaled, X_valid_scaled, X_test_scaled, y_train, y_valid, y_test
-
-def scale_dataset(X, scaler):
-    """
-    Scale the dataset using StandardScaler.
-    """
-    num_samples, num_timesteps, num_channels = X.shape
-    X_reshaped = X.reshape(-1, num_channels)
-    X_scaled = scaler.fit_transform(X_reshaped)
-    return X_scaled.reshape(num_samples, num_timesteps, num_channels)
-
-def create_tf_dataset(X, y, batch_size=32, shuffle=True, prefetch=True):
-    """
-    Create a TensorFlow dataset from numpy arrays.
-    """
-    dataset = tf.data.Dataset.from_tensor_slices((X, y))
-    if shuffle:
-        dataset = dataset.shuffle(buffer_size=len(X))
-    dataset = dataset.batch(batch_size)
-    if prefetch:
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
-    return dataset
-
-def prepare_csnecg_data(time_steps, base_path, batch_size):
-    """
-    Prepare CSN ECG data for model training, excluding the 'Other' class.
-    """
-    X, Y_cl = load_preprocessed_data(time_steps, base_path)
-    Y_binarized, label_names, Num2Label, label2Num, num_classes = prepare_labels(Y_cl)
-    X, Y_binarized = filter_data(X, Y_binarized)
-    X, Y_binarized = remove_rare_combinations(X, Y_binarized)
-
-    # Convert label_names to list for indexing
-    label_names = list(label_names)
-
-    # Ensure 'Other' exists in label_names
-    if 'Other' not in label_names:
-        logging.warning("'Other' class not found in label_names. Skipping removal.")
-    else:
-        # Identify the index of the "Other" class
-        other_class_index = label_names.index('Other')  # Now works because label_names is a list
-
-        # Create a mask to filter out "Other" class samples
-        non_other_mask = Y_binarized[:, other_class_index] == 0  # Assuming one-hot encoding
-
-        # Apply the mask to data and labels
-        X = X[non_other_mask]
-        Y_binarized = Y_binarized[non_other_mask]
-
-        # Remove the 'Other' column from Y_binarized
-        Y_binarized = np.delete(Y_binarized, other_class_index, axis=1)
-
-        # Update label names by removing "Other"
-        label_names = [label for label in label_names if label != 'Other']
-
-        # Update the number of classes
+    file_path = os.path.join(base_path, hdf5_file_path)
+    
+    # First, get the metadata
+    with h5py.File(file_path, 'r') as f:
+        label_names = [name.decode('utf-8') for name in f['label_names'][()]]
         num_classes = len(label_names)
+        total_samples = f['segments'].shape[0]
+        if max_samples is not None:
+            total_samples = min(max_samples, total_samples)
+    
+    def generator():
+        with h5py.File(file_path, 'r') as f:
+            for i in range(total_samples):
+                segment = f['segments'][i]
+                label_indices = f['labels'][i]
+                label_vector = np.zeros(num_classes, dtype=np.float32)
+                label_vector[label_indices] = 1.0
+                yield segment, label_vector
+    
+    dataset = tf.data.Dataset.from_generator(
+        generator,
+        output_signature=(
+            tf.TensorSpec(shape=(300, 12), dtype=tf.float32),
+            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
+        )
+    )
+    
+    return dataset, num_classes, label_names
 
-    # Split and scale the data
-    X_train, X_valid, X_test, y_train, y_valid, y_test = split_and_scale_data(X, Y_binarized)
+def prepare_csnecg_data(base_path, batch_size=128, hdf5_file_path='csnecg_segments.hdf5', max_samples=None):
+    """
+    Prepare CSN ECG data for model training by loading from HDF5.
 
-    # Ensure that the Other class was removed
-    print(f"Number of classes after removal of 'Other': {num_classes}")
-    print(f"Shape of Y_binarized: {Y_binarized.shape}")
+    Returns:
+    - train_dataset: TensorFlow dataset for training
+    - valid_dataset: TensorFlow dataset for validation
+    - test_dataset: TensorFlow dataset for testing
+    - num_classes: Number of classes
+    - label_names: List of label names
+    - Num2Label: Dictionary mapping indices to label names
+    """
+    try:
+        logging.info("Loading data from HDF5...")
+        dataset, num_classes, label_names = load_preprocessed_data(base_path, hdf5_file_path, max_samples)
 
-    # Create TensorFlow datasets
-    train_dataset = create_tf_dataset(X_train, y_train, batch_size=batch_size)
-    valid_dataset = create_tf_dataset(X_valid, y_valid, batch_size=batch_size, shuffle=False)
-    test_dataset = create_tf_dataset(X_test, y_test, batch_size=batch_size, shuffle=False)
+        # Get total size
+        with h5py.File(os.path.join(base_path, hdf5_file_path), 'r') as f:
+            total_size = f['segments'].shape[0]
+            if max_samples is not None:
+                total_size = min(max_samples, total_size)
 
-    return train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label
+        # Calculate split sizes
+        train_size = int(0.7 * total_size)
+        valid_size = int(0.15 * total_size)
+        test_size = total_size - train_size - valid_size
 
+        # Create the datasets with shuffling and batching
+        dataset = dataset.shuffle(buffer_size=10000, reshuffle_each_iteration=False)
+        train_dataset = dataset.take(train_size).batch(batch_size)
+        remaining = dataset.skip(train_size)
+        valid_dataset = remaining.take(valid_size).batch(batch_size)
+        test_dataset = remaining.skip(valid_size).batch(batch_size)
+
+        # Create Num2Label mapping
+        Num2Label = {idx: label for idx, label in enumerate(label_names)}
+
+        logging.info(f"Data loaded: Train={train_size}, Valid={valid_size}, Test={test_size}")
+        return (
+            train_dataset,
+            valid_dataset,
+            test_dataset,
+            num_classes,
+            label_names,
+            Num2Label,
+        )
+    except Exception as e:
+        logging.error(f"Error in prepare_csnecg_data: {str(e)}")
+        raise
 
 def main():
-    """
-    Main function to preprocess the CSN ECG dataset and save processed data to disk.
-    """
     # Define paths
     database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
-                                 'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
-                                 'WFDBRecords')
+                                'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
+                                'WFDBRecords')
     csv_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
                             'a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0',
                             'ConditionNames_SNOMED-CT.csv')
@@ -361,7 +406,8 @@ def main():
     class_mapping = {
         'AFIB': ['Atrial fibrillation', 'Atrial flutter'],
         'GSVT': ['Supraventricular tachycardia', 'Atrial tachycardia', 'Sinus node dysfunction', 
-                 'Sinus tachycardia', 'Atrioventricular nodal reentry tachycardia', 'Atrioventricular reentrant tachycardia'],
+                 'Sinus tachycardia', 'Atrioventricular nodal reentry tachycardia', 
+                 'Atrioventricular reentrant tachycardia'],
         'SB': ['Sinus bradycardia'],
         'SR': ['Sinus rhythm', 'Sinus irregularity']
     }
@@ -379,15 +425,13 @@ def main():
                 record_name = os.path.splitext(record_name)[0]
                 data_entries.append(record_name)
 
-    # Load data with plotting
-    load_data(
-        database_path, 
-        data_entries, 
-        snomed_ct_mapping, 
-        max_records=45152,  # Set to desired number of records
-        desired_lengths=[500, 1000, 2000, 5000],  # Process data for these lengths
-        num_plots_per_class=1,
-        plot_dir='output_plots/class_ecg_plots/'
+    # Process and save segments with peaks_per_signal limit
+    process_and_save_segments(
+        database_path=database_path,
+        data_entries=data_entries,
+        snomed_ct_mapping=snomed_ct_mapping,
+        peaks_per_signal=10,  # Limit to 10 peaks per signal
+        max_records=None
     )
 
 if __name__ == '__main__':

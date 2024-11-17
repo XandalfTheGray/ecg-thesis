@@ -3,7 +3,6 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report
 import seaborn as sns
 import sys
 import tensorflow as tf
@@ -11,13 +10,17 @@ from tensorflow import keras
 import argparse
 import time
 
+# Mount Google Drive and set paths
+from google.colab import drive
+drive.mount('/content/drive')
+
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
 
 # Import your modules
 from models import build_cnn
 from evaluation import (
-    evaluate_multilabel_model, 
+    evaluate_multilabel_model,
     CustomProgressBar,
     TimingCallback,
     log_timing_info
@@ -44,7 +47,19 @@ def main(time_steps, batch_size):
     }
 
     # Prepare data
-    train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csnecg_data(time_steps, base_path, batch_size)
+    peaks_per_signal = 10  # Match the value used in preprocessing
+    (
+        train_dataset,
+        valid_dataset,
+        test_dataset,
+        num_classes,
+        label_names,
+        Num2Label,
+    ) = prepare_csnecg_data(
+        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
+        batch_size=batch_size,
+        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    )
 
     # Build the CNN model
     model = build_cnn(
@@ -75,13 +90,10 @@ def main(time_steps, batch_size):
             monitor='val_loss', patience=10, restore_best_weights=True, verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, 'best_model.keras'),
+            filepath=os.path.join(output_dir, 'best_model.h5'),
             monitor='val_loss', save_best_only=True, verbose=1
         )
     ]
-
-    # Start prediction timing
-    predict_start_time = time.time()
 
     # Train the model
     print("\nStarting model training...")
@@ -99,7 +111,7 @@ def main(time_steps, batch_size):
     print(f"\nTotal training time: {total_training_time:.2f} seconds")
     print(f"Average time per epoch: {np.mean(timing_callback.times):.2f} seconds")
 
-    # Time predictions
+    # Generate predictions for test set
     print("\nGenerating predictions for test set...")
     test_timing = {}
     start_time = time.time()
@@ -122,16 +134,17 @@ def main(time_steps, batch_size):
     # Add test timing information to the log
     with open(os.path.join(output_dir, 'test_timing.txt'), 'w') as f:
         f.write("Prediction/Evaluation Timing:\n")
-        f.write(f"Test Set Prediction Time: {test_timing['Test']:.2f} seconds\n")
+        for name, time_taken in test_timing.items():
+            f.write(f"{name} Set Prediction Time: {time_taken:.2f} seconds\n")
 
-    # Evaluate and visualize using the centralized evaluate_multilabel_model function
+    # Evaluate and visualize
     evaluate_multilabel_model(
         y_true=y_true,
         y_pred=y_pred_classes,
         y_scores=y_pred,
         label_names=label_names,
         output_dir=output_dir,
-        history=history  # Pass the history object
+        history=history
     )
 
     print(f"\nTraining completed. Results saved in {output_dir}")
@@ -147,9 +160,9 @@ def main(time_steps, batch_size):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a CNN model on the preprocessed CSN ECG dataset.')
-    parser.add_argument('--time_steps', type=int, choices=[500, 1000, 2000, 5000], required=True, 
-                        help='Number of time steps in the preprocessed data.')
+    parser.add_argument('--time_steps', type=int, default=300, 
+                        help='Number of time steps in the preprocessed data (default: 300).')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='Batch size for training (default: 128)')
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     main(args.time_steps, args.batch_size)

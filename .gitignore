@@ -171,6 +171,8 @@ a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0/
 mit-bih-arrhythmia-database-1.0.0.zip
 mit-bih-arrhythmia-database/
 csnecg_preprocessed_data/
+csnecg_segments_10peaks.hdf5
+csnecg_segments.hdf5
 
 # old code
 csn_ecg_code/
@@ -180,6 +182,7 @@ output_plots/
 output_plots_draft1/
 output_plots_roshancnn/
 output_plots_roshancnn_draft1/
+csnecg_output_plots/
 
 # helper functions
 extract_record_structure.py
@@ -187,6 +190,3 @@ text_files.py
 create_ms_word_appendix.py
 code_appendix.html
 check_gpu_env.py
-
-# random scripts
-metronome_with_notes.py

@@ -3,14 +3,16 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report
 import seaborn as sns
 import sys
 import tensorflow as tf
 from tensorflow import keras
-from keras.optimizers import SGD
 import argparse
 import time
+
+# Mount Google Drive and set paths
+from google.colab import drive
+drive.mount('/content/drive')
 
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
@@ -18,7 +20,7 @@ sys.path.append('/content/ecg-thesis')
 # Import your modules
 from models import build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
 from evaluation import (
-    evaluate_multilabel_model, 
+    evaluate_multilabel_model,
     CustomProgressBar,
     TimingCallback,
     log_timing_info
@@ -30,8 +32,11 @@ def main(time_steps, batch_size, resnet_type):
     base_path = '/content/drive/MyDrive/'
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{resnet_type}_{time_steps}steps_{batch_size}batch")
+    model_type = resnet_type
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
+
+    learning_rate = 1e-3
 
     # Define model parameters
     model_params = {
@@ -39,7 +44,19 @@ def main(time_steps, batch_size, resnet_type):
     }
 
     # Prepare data
-    train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csnecg_data(time_steps, base_path, batch_size)
+    peaks_per_signal = 10  # Match the value used in preprocessing
+    (
+        train_dataset,
+        valid_dataset,
+        test_dataset,
+        num_classes,
+        label_names,
+        Num2Label,
+    ) = prepare_csnecg_data(
+        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
+        batch_size=batch_size,
+        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    )
 
     # Build the ResNet model based on the specified type
     if resnet_type == 'resnet18':
@@ -69,7 +86,7 @@ def main(time_steps, batch_size, resnet_type):
     # Compile the model
     model.compile(
         loss='binary_crossentropy',
-        optimizer=tf.keras.optimizers.Adam(1e-3), # Alternatively, use SGD if desired
+        optimizer=tf.keras.optimizers.Adam(learning_rate),
         metrics=['accuracy']
     )
 
@@ -87,35 +104,42 @@ def main(time_steps, batch_size, resnet_type):
             monitor='val_loss', patience=10, restore_best_weights=True, verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, 'best_model.keras'),
+            filepath=os.path.join(output_dir, 'best_model.h5'),
             monitor='val_loss', save_best_only=True, verbose=1
         )
     ]
 
-    # Start prediction timing
-    predict_start_time = time.time()
-
     # Train the model
+    print("\nStarting model training...")
+    training_start = time.time()
+    
     history = model.fit(
         train_dataset,
         epochs=30,
         validation_data=valid_dataset,
         callbacks=callbacks
     )
+    
+    training_end = time.time()
+    total_training_time = training_end - training_start
+    print(f"\nTotal training time: {total_training_time:.2f} seconds")
+    print(f"Average time per epoch: {np.mean(timing_callback.times):.2f} seconds")
 
-    # Time predictions
+    # Generate predictions for test set
+    print("\nGenerating predictions for test set...")
     test_timing = {}
     start_time = time.time()
     y_pred = model.predict(test_dataset)
     end_time = time.time()
     test_timing['Test'] = end_time - start_time
+    print(f"Test set prediction time: {test_timing['Test']:.2f} seconds")
 
     y_pred_classes = (y_pred > 0.5).astype(int)
     y_true = np.concatenate([y for x, y in test_dataset], axis=0).astype(int)
 
     # Log timing information
     model_info = {
-        'model_type': resnet_type,
+        'model_type': model_type,
         'dataset': dataset_name,
         'parameters': model_params
     }
@@ -124,16 +148,17 @@ def main(time_steps, batch_size, resnet_type):
     # Add test timing information to the log
     with open(os.path.join(output_dir, 'test_timing.txt'), 'w') as f:
         f.write("Prediction/Evaluation Timing:\n")
-        f.write(f"Test Set Prediction Time: {test_timing['Test']:.2f} seconds\n")
+        for name, time_taken in test_timing.items():
+            f.write(f"{name} Set Prediction Time: {time_taken:.2f} seconds\n")
 
-    # Evaluate and visualize using the centralized evaluate_multilabel_model function
+    # Evaluate and visualize
     evaluate_multilabel_model(
         y_true=y_true,
         y_pred=y_pred_classes,
         y_scores=y_pred,
         label_names=label_names,
         output_dir=output_dir,
-        history=history  # Pass the history object
+        history=history
     )
 
     print(f"\nTraining completed. Results saved in {output_dir}")
@@ -141,7 +166,7 @@ def main(time_steps, batch_size, resnet_type):
     # Save model parameters to a text file
     with open(os.path.join(output_dir, 'model_params.txt'), 'w') as f:
         f.write(f"Dataset: {dataset_name}\n")
-        f.write(f"Model Type: {resnet_type}\n")
+        f.write(f"Model Type: {model_type}\n")
         f.write(f"Time Steps: {time_steps}\n")
         f.write(f"Batch Size: {batch_size}\n")
         for key, value in model_params.items():
@@ -149,11 +174,11 @@ def main(time_steps, batch_size, resnet_type):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a ResNet model on the preprocessed CSN ECG dataset.')
-    parser.add_argument('--time_steps', type=int, choices=[500, 1000, 2000, 5000], required=True, 
-                        help='Number of time steps in the preprocessed data.')
+    parser.add_argument('--time_steps', type=int, default=300, 
+                        help='Number of time steps in the preprocessed data (default: 300).')
     parser.add_argument('--batch_size', type=int, default=128, 
                         help='Batch size for training (default: 128)')
     parser.add_argument('--resnet_type', type=str, choices=['resnet18', 'resnet34', 'resnet50'], 
                         default='resnet18', help='Type of ResNet model to train (default: resnet18)')
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     main(args.time_steps, args.batch_size, args.resnet_type)

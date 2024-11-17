@@ -76,8 +76,24 @@ class CustomProgressBar(keras.callbacks.Callback):
     """
     Custom callback to display progress bars during training.
     """
-    def on_epoch_end(self, epoch, logs=None):
-        print(f"Epoch {epoch + 1}: Loss = {logs.get('loss'):.4f}, Accuracy = {logs.get('accuracy'):.4f}")
+    def on_epoch_begin(self, epoch, logs=None):
+        print(f"\nEpoch {epoch + 1}/{self.params['epochs']}")
+        self.seen = 0
+        
+    def on_batch_end(self, batch, logs=None):
+        self.seen += 1
+        # Calculate progress bar elements
+        total_batches = self.params['steps']
+        progress = int(50 * self.seen / total_batches)
+        bar = '=' * progress + '>' + ' ' * (50 - progress)
+        
+        # Create status line with metrics
+        status = f'\r{self.seen}/{total_batches} [{bar}] - '
+        for metric, value in logs.items():
+            status += f'{metric}: {value:.4f} '
+            
+        # Print status line and return to start of line
+        print(status, end='', flush=True)
 
 # ==============================
 # Multilabel Evaluation and Plotting Functions

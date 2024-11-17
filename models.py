@@ -4,6 +4,7 @@ from keras import layers, models
 from keras.regularizers import l2
 from keras.layers import Input, Conv1D, MaxPooling1D, Dropout, Flatten, Dense, BatchNormalization, MultiHeadAttention, LayerNormalization, Dense
 from keras.layers import MultiHeadAttention, LayerNormalization, Dense, Dropout, GlobalAveragePooling1D
+import tensorflow as tf
 
 def build_cnn(input_shape, num_classes, l2_reg=0.001, activation='softmax', **kwargs):
     """
@@ -262,20 +263,29 @@ def build_resnet50_1d(input_shape, num_classes, l2_reg=0.001, activation='softma
     return model
 
 def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0):
-    # Multi-Head Attention
-    x = LayerNormalization(epsilon=1e-6)(inputs)
-    x = MultiHeadAttention(
-        key_dim=head_size, num_heads=num_heads, dropout=dropout
+    # Remove explicit casting
+    x = inputs
+    
+    # Multi-head self attention
+    x = tf.keras.layers.MultiHeadAttention(
+        num_heads=num_heads, key_dim=head_size, dropout=dropout
     )(x, x)
-    x = Dropout(dropout)(x)
-    res = x + inputs
-
-    # Feed Forward
-    x = LayerNormalization(epsilon=1e-6)(res)
-    x = Dense(ff_dim, activation="relu")(x)
-    x = Dropout(dropout)(x)
-    x = Dense(inputs.shape[-1])(x)
-    return x + res
+    
+    # Add & normalize
+    x = tf.keras.layers.Add()([x, inputs])
+    x = tf.keras.layers.LayerNormalization(epsilon=1e-6)(x)
+    
+    # Feed-forward network
+    x_dense = tf.keras.Sequential([
+        tf.keras.layers.Dense(ff_dim, activation="relu"),
+        tf.keras.layers.Dense(inputs.shape[-1]),
+    ])(x)
+    
+    # Add & normalize
+    x = tf.keras.layers.Add()([x_dense, x])
+    x = tf.keras.layers.LayerNormalization(epsilon=1e-6)(x)
+    
+    return x
 
 def build_transformer(input_shape, num_classes, head_size, num_heads, ff_dim, num_transformer_blocks, mlp_units, dropout=0, mlp_dropout=0, activation='softmax', **kwargs):
     # The **kwargs allows the function to accept additional arguments without error
@@ -285,27 +295,6 @@ def build_transformer(input_shape, num_classes, head_size, num_heads, ff_dim, nu
         x = transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
 
     x = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
-    for dim in mlp_units:
-        x = Dense(dim, activation="relu")(x)
-        x = Dropout(mlp_dropout)(x)
-    outputs = Dense(num_classes, activation=activation)(x)
-    return models.Model(inputs, outputs)
-    inputs = Input(shape=input_shape)
-    x = inputs
-    
-    num_transformer_blocks = kwargs.get('num_transformer_blocks', 4)
-    head_size = kwargs.get('head_size', 256)
-    num_heads = kwargs.get('num_heads', 4)
-    ff_dim = kwargs.get('ff_dim', 4)
-    dropout = kwargs.get('dropout', 0)
-    mlp_units = kwargs.get('mlp_units', [128])
-    mlp_dropout = kwargs.get('mlp_dropout', 0)
-    activation = kwargs.get('activation', 'softmax')
-
-    for _ in range(num_transformer_blocks):
-        x = transformer_encoder_tf(x, head_size, num_heads, ff_dim, dropout)
-
-    x = GlobalAveragePooling1D(data_format="channels_first")(x)
     for dim in mlp_units:
         x = Dense(dim, activation="relu")(x)
         x = Dropout(mlp_dropout)(x)

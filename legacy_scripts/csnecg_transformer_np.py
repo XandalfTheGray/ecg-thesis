@@ -3,21 +3,18 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report
 import seaborn as sns
 import sys
 import tensorflow as tf
 from tensorflow import keras
+from keras import mixed_precision
 import argparse
 import time
 
-# Mount Google Drive and set paths
-from google.colab import drive
-drive.mount('/content/drive')
-
-# Remove mixed precision policy for now
-# from keras import mixed_precision
-# policy = mixed_precision.Policy('mixed_float16')
-# mixed_precision.set_global_policy(policy)
+# Enable mixed precision for better performance on GPUs
+policy = mixed_precision.Policy('mixed_float16')
+mixed_precision.set_global_policy(policy)
 
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
@@ -25,7 +22,7 @@ sys.path.append('/content/ecg-thesis')
 # Import your modules
 from models import build_transformer
 from evaluation import (
-    evaluate_multilabel_model,
+    evaluate_multilabel_model, 
     CustomProgressBar,
     TimingCallback,
     log_timing_info
@@ -38,45 +35,38 @@ def main(time_steps, batch_size):
     base_output_dir = os.path.join(base_path, 'csnecg_output_plots')
     dataset_name = 'csnecg'
     model_type = 'transformer'
-    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_{time_steps}steps_{batch_size}batch")
+    # Old way:
+    # output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_300steps_{batch_size}batch")
+    # Using fixed 300-sample windows
+    output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}_300steps_{batch_size}batch")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Define model parameters
     model_params = {
-        'head_size': 64,
-        'num_heads': 4,
-        'ff_dim': 32,
-        'num_transformer_blocks': 2,
-        'mlp_units': [64],
+        'head_size': 256,
+        'num_heads': 8,
+        'ff_dim': 16,
+        'num_transformer_blocks': 4,
+        'mlp_units': [128],
         'mlp_dropout': 0.3,
         'dropout': 0.25,
     }
 
     # Prepare data
-    peaks_per_signal = 10  # Match the value used in preprocessing
-    (
-        train_dataset,
-        valid_dataset,
-        test_dataset,
-        num_classes,
-        label_names,
-        Num2Label,
-    ) = prepare_csnecg_data(
-        base_path=os.path.join(base_path, 'csnecg_preprocessed_data'),
-        batch_size=batch_size,
-        hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
+    train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csnecg_data(
+        base_path=base_path, batch_size=batch_size
     )
 
     # Build the Transformer model
     model = build_transformer(
-        input_shape=(time_steps, 12),
+        input_shape=(300, 12),  # Fixed window size
         num_classes=num_classes,
         activation='sigmoid',
         **model_params
     )
 
-    # Compile the model without mixed precision optimizer
+    # Compile the model with mixed precision optimizer
     optimizer = tf.keras.optimizers.Adam(1e-4)
+    optimizer = mixed_precision.LossScaleOptimizer(optimizer)
 
     model.compile(
         loss='binary_crossentropy',
@@ -86,7 +76,7 @@ def main(time_steps, batch_size):
 
     # Create timing callback
     timing_callback = TimingCallback()
-
+    
     # Add timing callback to the callbacks list
     callbacks = [
         CustomProgressBar(),
@@ -98,15 +88,15 @@ def main(time_steps, batch_size):
             monitor='val_loss', patience=10, restore_best_weights=True, verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(output_dir, 'best_model.h5'),
+            filepath=os.path.join(output_dir, 'best_model.keras'),
             monitor='val_loss', save_best_only=True, verbose=1
         )
     ]
 
-    # Train the model
-    print("\nStarting model training...")
-    training_start = time.time()
+    # Start prediction timing
+    predict_start_time = time.time()
 
+    # Train the model
     history = model.fit(
         train_dataset,
         epochs=30,
@@ -114,19 +104,12 @@ def main(time_steps, batch_size):
         callbacks=callbacks
     )
 
-    training_end = time.time()
-    total_training_time = training_end - training_start
-    print(f"\nTotal training time: {total_training_time:.2f} seconds")
-    print(f"Average time per epoch: {np.mean(timing_callback.times):.2f} seconds")
-
-    # Generate predictions for test set
-    print("\nGenerating predictions for test set...")
+    # Time predictions
     test_timing = {}
     start_time = time.time()
     y_pred = model.predict(test_dataset)
     end_time = time.time()
     test_timing['Test'] = end_time - start_time
-    print(f"Test set prediction time: {test_timing['Test']:.2f} seconds")
 
     y_pred_classes = (y_pred > 0.5).astype(int)
     y_true = np.concatenate([y for x, y in test_dataset], axis=0).astype(int)
@@ -142,17 +125,16 @@ def main(time_steps, batch_size):
     # Add test timing information to the log
     with open(os.path.join(output_dir, 'test_timing.txt'), 'w') as f:
         f.write("Prediction/Evaluation Timing:\n")
-        for name, time_taken in test_timing.items():
-            f.write(f"{name} Set Prediction Time: {time_taken:.2f} seconds\n")
+        f.write(f"Test Set Prediction Time: {test_timing['Test']:.2f} seconds\n")
 
-    # Evaluate and visualize
+    # Evaluate and visualize using the centralized evaluate_multilabel_model function
     evaluate_multilabel_model(
         y_true=y_true,
         y_pred=y_pred_classes,
         y_scores=y_pred,
         label_names=label_names,
         output_dir=output_dir,
-        history=history
+        history=history  # Pass the history object
     )
 
     print(f"\nTraining completed. Results saved in {output_dir}")
@@ -168,9 +150,11 @@ def main(time_steps, batch_size):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a Transformer model on the preprocessed CSN ECG dataset.')
-    parser.add_argument('--time_steps', type=int, default=300,
+    # parser.add_argument('--time_steps', type=int, choices=[500, 1000, 2000, 5000], required=True, 
+    #                     help='Number of time steps in the preprocessed data.')
+    parser.add_argument('--time_steps', type=int, default=300, 
                         help='Number of time steps in the preprocessed data (default: 300).')
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch_size', type=int, default=128, 
                         help='Batch size for training (default: 128)')
-    args, unknown = parser.parse_known_args()
+    args = parser.parse_args()
     main(args.time_steps, args.batch_size)
