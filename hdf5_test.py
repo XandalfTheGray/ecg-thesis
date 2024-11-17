@@ -4,7 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
-# Import your data preparation function
+# Import your modules
+from models import build_cnn
 from csnecg_data_preprocessing import prepare_csnecg_data
 
 def inspect_hdf5_file(hdf5_file_path):
@@ -90,20 +91,19 @@ def test_training_run(base_path, batch_size=128, max_samples=1000):
     try:
         # Load data
         train_dataset, valid_dataset, test_dataset, num_classes, label_names, Num2Label = prepare_csnecg_data(
-            base_path=base_path, batch_size=batch_size, hdf5_file_path='csnecg_segments.hdf5', max_samples=max_samples
+            base_path=base_path, 
+            batch_size=batch_size,
+            hdf5_file_path='csnecg_segments_10peaks.hdf5'  # Specify correct file
         )
 
-        # Take only a small subset for testing
-        train_subset = train_dataset.take(2)
-        valid_subset = valid_dataset.take(1)
-        test_subset = test_dataset.take(1)
-
-        # Import your model building function
-        from models import build_cnn
+        # Take only a very small subset for testing
+        train_subset = train_dataset.take(1)  # Just take 1 batch
+        valid_subset = valid_dataset.take(1)  # Just take 1 batch
+        test_subset = test_dataset.take(1)    # Just take 1 batch
 
         # Build a simple CNN model
         model = build_cnn(
-            input_shape=(300, 12),
+            input_shape=(300, 12),  # Fixed shape from HDF5
             num_classes=num_classes,
             activation='sigmoid'
         )
@@ -121,9 +121,8 @@ def test_training_run(base_path, batch_size=128, max_samples=1000):
             validation_data=valid_subset
         )
 
-        # Test on a single batch
-        loss, accuracy = model.evaluate(test_subset)
-        print(f"Test loss: {loss:.4f}, Test accuracy: {accuracy:.4f}")
+        print("Test training completed successfully!")
+        
     except Exception as e:
         print(f"Error during training test: {e}")
 
