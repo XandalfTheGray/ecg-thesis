@@ -377,16 +377,21 @@ def prepare_csnecg_data(
         logging.info("Preparing data using generator...")
         file_path = os.path.join(base_path, hdf5_file_path)
         
-        # Get metadata from HDF5 file
+        # Get metadata and calculate sizes
         with h5py.File(file_path, 'r') as f:
             total_size = f['segments'].shape[0]
             label_names = [name.decode('utf-8') for name in f['label_names'][()]]
             num_classes = len(label_names)
-        
-        # Calculate correct split sizes
-        train_size = int(0.7 * total_size)
-        valid_size = int(0.15 * total_size)
-        test_size = total_size - train_size - valid_size
+            
+            # Calculate split sizes
+            train_size = int(0.7 * total_size)
+            valid_size = int(0.15 * total_size)
+            test_size = total_size - train_size - valid_size
+            
+            # Calculate steps
+            steps_per_epoch = train_size // batch_size
+            validation_steps = valid_size // batch_size
+            test_steps = test_size // batch_size
         
         # Create dataset from generator with prefetch
         dataset = tf.data.Dataset.from_generator(
@@ -430,6 +435,9 @@ def prepare_csnecg_data(
             num_classes,
             label_names,
             Num2Label,
+            steps_per_epoch,
+            validation_steps,
+            test_steps
         )
     except Exception as e:
         logging.error(f"Error in prepare_csnecg_data: {str(e)}")

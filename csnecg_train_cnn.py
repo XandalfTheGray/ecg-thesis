@@ -44,18 +44,6 @@ def main(time_steps, batch_size):
         'dropout_rates': [0.3, 0.3, 0.3, 0.3],
     }
 
-    # Calculate dataset sizes from local HDF5
-    with h5py.File(f'csnecg_segments_{peaks_per_signal}peaks.hdf5', 'r') as f:
-        total_size = f['segments'].shape[0]
-        train_size = int(0.7 * total_size)
-        valid_size = int(0.15 * total_size)
-        test_size = total_size - train_size - valid_size
-
-    # Calculate steps correctly
-    steps_per_epoch = train_size // batch_size
-    validation_steps = valid_size // batch_size
-    test_steps = test_size // batch_size
-
     # Prepare data with optimized memory usage
     peaks_per_signal = 1
     (
@@ -65,6 +53,9 @@ def main(time_steps, batch_size):
         num_classes,
         label_names,
         Num2Label,
+        steps_per_epoch,
+        validation_steps,
+        test_steps
     ) = prepare_csnecg_data(
         base_path='.',
         batch_size=batch_size,

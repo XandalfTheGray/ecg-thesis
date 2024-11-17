@@ -41,7 +41,7 @@ def main(time_steps, batch_size, resnet_type):
     }
 
     # Prepare data - using current directory for HDF5 file
-    peaks_per_signal = 1  # Match the value used in preprocessing
+    peaks_per_signal = 1
     (
         train_dataset,
         valid_dataset,
@@ -49,23 +49,14 @@ def main(time_steps, batch_size, resnet_type):
         num_classes,
         label_names,
         Num2Label,
+        steps_per_epoch,
+        validation_steps,
+        test_steps
     ) = prepare_csnecg_data(
-        base_path='.',  # Current directory for HDF5 file
+        base_path='.',
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
-
-    # Calculate dataset sizes from local HDF5
-    with h5py.File(f'csnecg_segments_{peaks_per_signal}peaks.hdf5', 'r') as f:
-        total_size = f['segments'].shape[0]
-        train_size = int(0.7 * total_size)
-        valid_size = int(0.15 * total_size)
-        test_size = total_size - train_size - valid_size
-
-    # Calculate steps correctly
-    steps_per_epoch = train_size // batch_size
-    validation_steps = valid_size // batch_size
-    test_steps = test_size // batch_size
 
     # Build the ResNet model based on the specified type
     if resnet_type == 'resnet18':

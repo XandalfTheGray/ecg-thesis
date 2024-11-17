@@ -70,8 +70,11 @@ def main(time_steps, batch_size):
         num_classes,
         label_names,
         Num2Label,
+        steps_per_epoch,
+        validation_steps,
+        test_steps
     ) = prepare_csnecg_data(
-        base_path='.',  # Current directory for HDF5 file
+        base_path='.',
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
