@@ -11,6 +11,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from collections import Counter
 import h5py
 import tensorflow as tf
+import collections
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -119,21 +120,21 @@ def detect_r_peaks(ecg_data, distance=50, fs=500):
 def segment_signal(signal, r_peaks, labels, window_size=300):
     """
     Segment the signal into fixed windows around R-peaks.
-    
-    Parameters:
-    - signal: The ECG signal array (samples x leads)
-    - r_peaks: Array of R-peak locations
-    - labels: Array of labels for each R-peaks
-    - window_size: Total window size (default 300: 150 before + 150 after R-peak)
-    
-    Returns:
-    - segments: Array of segmented signals
-    - valid_labels: Array of labels corresponding to each segment
+    If no peaks provided, finds first peak in signal.
     """
-    if r_peaks is None or len(r_peaks) == 0:
-        logging.warning("No R-peaks provided for segmentation")
-        return np.array([]), np.array([])
-        
+    if len(r_peaks) == 0:
+        # Try to find at least one peak in any lead
+        for lead_idx in [0, 1, 6, 7, 8, 9, 10, 11]:  # Important leads
+            # Always filter before peak detection
+            filtered_signal = filter_ecg(signal[:, lead_idx], fs=500)
+            peaks, _ = find_peaks(filtered_signal, 
+                                distance=50,
+                                height=0.1,      # Match detect_r_peaks parameters
+                                prominence=0.2)
+            if len(peaks) > 0:
+                r_peaks = [peaks[0]]  # Use first peak found
+                break
+    
     pre_buffer = window_size // 2
     post_buffer = window_size - pre_buffer
     
@@ -141,16 +142,18 @@ def segment_signal(signal, r_peaks, labels, window_size=300):
     valid_labels = []
     
     for peak in r_peaks:
-        try:
-            # Check if we can extract a complete window
-            if peak - pre_buffer >= 0 and peak + post_buffer <= signal.shape[0]:
-                # Extract the window
-                segment = signal[peak - pre_buffer:peak + post_buffer]
-                segments.append(segment)
-                valid_labels.append(labels)  # Use the record's labels for each segment
-        except Exception as e:
-            logging.warning(f"Error processing segment at peak {peak}: {str(e)}")
-            continue
+        segment = np.zeros((window_size, signal.shape[1]))  # Pre-allocate with zeros
+        
+        # Calculate valid indices
+        start_idx = max(0, peak - pre_buffer)
+        end_idx = min(signal.shape[0], peak + post_buffer)
+        seg_start = pre_buffer - (peak - start_idx)
+        seg_end = seg_start + (end_idx - start_idx)
+        
+        # Copy signal data into zero-padded segment
+        segment[seg_start:seg_end] = signal[start_idx:end_idx]
+        segments.append(segment)
+        valid_labels.append(labels)
     
     return np.array(segments), np.array(valid_labels)
 
@@ -391,6 +394,14 @@ def prepare_csnecg_data(
         logging.error(f"Error in prepare_csnecg_data: {str(e)}")
         raise
 
+def check_label_distribution(num_peaks):
+    file_path = f'csnecg_segments_{num_peaks}peaks.hdf5'
+    with h5py.File(file_path, 'r') as f:
+        labels = f['labels'][:]
+        flattened_labels = [label for sublist in labels for label in sublist]
+        label_counts = collections.Counter(flattened_labels)
+        print("Label Distribution:", label_counts)
+
 def main():
     # Define paths
     database_path = os.path.join('a-large-scale-12-lead-electrocardiogram-database-for-arrhythmia-study-1.0.0', 
@@ -423,14 +434,20 @@ def main():
                 record_name = os.path.splitext(record_name)[0]
                 data_entries.append(record_name)
 
+    # Define the number of peaks per signal
+    peaks_per_signal = 1
+
     # Process and save segments with peaks_per_signal limit
     process_and_save_segments(
         database_path=database_path,
         data_entries=data_entries,
         snomed_ct_mapping=snomed_ct_mapping,
-        peaks_per_signal=10,  # Limit to 10 peaks per signal
+        peaks_per_signal=peaks_per_signal,
         max_records=None
     )
+
+    # Check label distribution
+    check_label_distribution(peaks_per_signal)
 
 if __name__ == '__main__':
     main()
