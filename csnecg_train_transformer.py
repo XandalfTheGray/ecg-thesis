@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow import keras
 import argparse
 import time
+import h5py
 
 # Remove mixed precision policy for now
 # from keras import mixed_precision
@@ -100,6 +101,16 @@ def main(time_steps, batch_size):
         )
     ]
 
+    # Calculate train and validation sizes from the dataset info
+    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
+        total_size = f['segments'].shape[0]
+        train_size = int(0.7 * total_size)
+        valid_size = int(0.15 * total_size)
+
+    # Calculate steps
+    steps_per_epoch = train_size // batch_size
+    validation_steps = valid_size // batch_size
+
     # Train the model
     print("\nStarting model training...")
     training_start = time.time()
@@ -107,7 +118,9 @@ def main(time_steps, batch_size):
     history = model.fit(
         train_dataset,
         epochs=30,
+        steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
+        validation_steps=validation_steps,
         callbacks=callbacks
     )
 

@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow import keras
 import argparse
 import time
+import h5py
 
 # Add the directory containing your modules to the Python path
 sys.path.append('/content/ecg-thesis')
@@ -54,6 +55,16 @@ def main(time_steps, batch_size, resnet_type):
         batch_size=batch_size,
         hdf5_file_path=f'csnecg_segments_{peaks_per_signal}peaks.hdf5'
     )
+
+    # Calculate train and validation sizes from the dataset info
+    with h5py.File(os.path.join(base_path, 'csnecg_preprocessed_data', f'csnecg_segments_{peaks_per_signal}peaks.hdf5'), 'r') as f:
+        total_size = f['segments'].shape[0]
+        train_size = int(0.7 * total_size)
+        valid_size = int(0.15 * total_size)
+
+    # Calculate steps
+    steps_per_epoch = train_size // batch_size
+    validation_steps = valid_size // batch_size
 
     # Build the ResNet model based on the specified type
     if resnet_type == 'resnet18':
@@ -113,7 +124,9 @@ def main(time_steps, batch_size, resnet_type):
     history = model.fit(
         train_dataset,
         epochs=30,
+        steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
+        validation_steps=validation_steps,
         callbacks=callbacks
     )
     

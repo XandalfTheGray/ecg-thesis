@@ -79,21 +79,29 @@ class CustomProgressBar(keras.callbacks.Callback):
     def on_epoch_begin(self, epoch, logs=None):
         print(f"\nEpoch {epoch + 1}/{self.params['epochs']}")
         self.seen = 0
+        # Calculate total steps if not provided
+        if self.params.get('steps') is None:
+            try:
+                self.params['steps'] = self.params['samples'] // self.params['batch_size']
+            except KeyError:
+                # If we can't calculate steps, use the dataset length
+                self.params['steps'] = len(self.model.train_dataset)
         
     def on_batch_end(self, batch, logs=None):
         self.seen += 1
-        # Calculate progress bar elements
-        total_batches = self.params['steps']
-        progress = int(50 * self.seen / total_batches)
-        bar = '=' * progress + '>' + ' ' * (50 - progress)
-        
-        # Create status line with metrics
-        status = f'\r{self.seen}/{total_batches} [{bar}] - '
-        for metric, value in logs.items():
-            status += f'{metric}: {value:.4f} '
+        # Ensure we have valid total_batches
+        total_batches = self.params.get('steps', 0)
+        if total_batches > 0:  # Only show progress if we have valid total_batches
+            progress = int(50 * self.seen / total_batches)
+            bar = '=' * progress + '>' + ' ' * (50 - progress)
             
-        # Print status line and return to start of line
-        print(status, end='', flush=True)
+            # Create status line with metrics
+            status = f'\r{self.seen}/{total_batches} [{bar}] - '
+            for metric, value in logs.items():
+                status += f'{metric}: {value:.4f} '
+                
+            # Print status line and return to start of line
+            print(status, end='', flush=True)
 
 # ==============================
 # Multilabel Evaluation and Plotting Functions
