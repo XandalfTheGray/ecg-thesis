@@ -55,7 +55,6 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
 
     # Prepare data with class weights
     (train_dataset, valid_dataset, test_dataset, 
-     steps_per_epoch, validation_steps, test_steps,
      y_test, class_weights) = prepare_data_for_training(
         X, Y, batch_size=batch_size
     )
