@@ -38,22 +38,23 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
 
     learning_rate = 1e-3
 
-    model_params = {
-        'l2_reg': 0.001,
-    }
-
     # Load data with peaks_per_signal
     data_dir = local_data_dir
     X, Y, label_names = load_data_numpy(data_dir, peaks_per_signal)
     num_classes = Y.shape[1]
 
-    # Prepare data
+    # Prepare data with class weights
     (train_dataset, valid_dataset, test_dataset, 
-     steps_per_epoch, validation_steps, test_steps, y_test) = prepare_data_for_training(
+     steps_per_epoch, validation_steps, test_steps,
+     y_test, class_weights) = prepare_data_for_training(
         X, Y, batch_size=batch_size
     )
 
     # Build the ResNet model
+    model_params = {
+        'l2_reg': 0.001,
+    }
+
     if resnet_type == 'resnet18':
         model = build_resnet18_1d(
             input_shape=(time_steps, 12),
@@ -78,11 +79,12 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
     else:
         raise ValueError("Invalid ResNet type.")
 
-    # Compile the model
+    # Compile with class weights
+    class_weight_dict = {i: w for i, w in enumerate(class_weights)}
     model.compile(
         loss='binary_crossentropy',
         optimizer=tf.keras.optimizers.Adam(learning_rate),
-        metrics=['accuracy']
+        metrics=['accuracy', tf.keras.metrics.AUC(name='auc')]
     )
 
     # Callbacks
@@ -91,18 +93,21 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
         CustomProgressBar(),
         timing_callback,
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
+            monitor='val_auc', mode='max',
+            factor=0.5, patience=3, min_lr=1e-6, verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor='val_loss', patience=10, restore_best_weights=True, verbose=1
+            monitor='val_auc', mode='max',
+            patience=10, restore_best_weights=True, verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, 'best_model.keras'),
-            monitor='val_loss', save_best_only=True, verbose=1
+            monitor='val_auc', mode='max',
+            save_best_only=True, verbose=1
         )
     ]
 
-    # Train the model
+    # Train with class weights
     print("\nStarting model training...")
     training_start = time.time()
     
@@ -113,6 +118,7 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
         validation_data=valid_dataset,
         validation_steps=validation_steps,
         callbacks=callbacks,
+        class_weight=class_weight_dict,
         verbose=1
     )
     

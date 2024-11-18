@@ -44,26 +44,27 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     X, Y, label_names = load_data_numpy(data_dir, peaks_per_signal)
     num_classes = Y.shape[1]
 
-    # Prepare data
+    # Prepare data with class weights
     (train_dataset, valid_dataset, test_dataset, 
-     steps_per_epoch, validation_steps, test_steps, y_test) = prepare_data_for_training(
+     steps_per_epoch, validation_steps, test_steps,
+     y_test, class_weights) = prepare_data_for_training(
         X, Y, batch_size=batch_size
     )
 
-    # Define model parameters
+    # Define model parameters with increased capacity
     model_params = {
-        'head_size': 64,
-        'num_heads': 4,
-        'ff_dim': 32,
-        'num_transformer_blocks': 2,
-        'mlp_units': [64],
+        'head_size': 128,        # Increased from 64
+        'num_heads': 8,          # Increased from 4
+        'ff_dim': 64,           # Increased from 32
+        'num_transformer_blocks': 4,  # Increased from 2
+        'mlp_units': [128, 64],  # Added another layer
         'mlp_dropout': 0.3,
         'dropout': 0.25,
     }
 
     learning_rate = 1e-4
 
-    # Build the Transformer model
+    # Build and compile model with class weights
     model = build_transformer(
         input_shape=(time_steps, 12),
         num_classes=num_classes,
@@ -71,11 +72,12 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         **model_params
     )
 
-    # Compile the model
+    # Compile with class weights
+    class_weight_dict = {i: w for i, w in enumerate(class_weights)}
     model.compile(
         loss='binary_crossentropy',
-        optimizer=tf.keras.optimizers.Adam(learning_rate),
-        metrics=['accuracy']
+        optimizer=tf.keras.optimizers.Adam(1e-4),
+        metrics=['accuracy', tf.keras.metrics.AUC(name='auc')]
     )
 
     # Callbacks
@@ -84,14 +86,26 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         CustomProgressBar(),
         timing_callback,
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1
+            monitor='val_auc',  # Changed from val_loss
+            factor=0.5,
+            patience=3,
+            min_lr=1e-6,
+            verbose=1,
+            mode='max'  # Changed to max for AUC
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor='val_loss', patience=10, restore_best_weights=True, verbose=1
+            monitor='val_auc',  # Changed from val_loss
+            patience=10,
+            restore_best_weights=True,
+            verbose=1,
+            mode='max'  # Changed to max for AUC
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, 'best_model.keras'),
-            monitor='val_loss', save_best_only=True, verbose=1
+            monitor='val_auc',  # Changed from val_loss
+            save_best_only=True,
+            verbose=1,
+            mode='max'  # Changed to max for AUC
         )
     ]
 
@@ -106,6 +120,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         validation_data=valid_dataset,
         validation_steps=validation_steps,
         callbacks=callbacks,
+        class_weight=class_weight_dict,
         verbose=1
     )
     

@@ -270,40 +270,53 @@ def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=12
     """
     # Split data into train, validation, and test sets
     X_train_val, X_test, Y_train_val, Y_test = train_test_split(
-        X, Y, test_size=test_size, random_state=42
+        X, Y, test_size=test_size, random_state=42, stratify=Y.sum(axis=1)  # Stratify by label combinations
     )
     val_size_adjusted = val_size / (1 - test_size)
     X_train, X_valid, Y_train, Y_valid = train_test_split(
-        X_train_val, Y_train_val, test_size=val_size_adjusted, random_state=42
+        X_train_val, Y_train_val, test_size=val_size_adjusted, random_state=42,
+        stratify=Y_train_val.sum(axis=1)  # Stratify by label combinations
     )
 
-    # Optional: Standardize data
+    # Calculate class weights
+    class_weights = []
+    n_samples = Y_train.shape[0]
+    n_classes = Y_train.shape[1]
+    for i in range(n_classes):
+        class_count = np.sum(Y_train[:, i])
+        weight = (n_samples / (n_classes * class_count))
+        class_weights.append(weight)
+    
+    # Standardize data
     scaler = StandardScaler()
     num_samples_train, num_timesteps, num_channels = X_train.shape
-
-    # Reshape and scale training data
     X_train_reshaped = X_train.reshape(-1, num_channels)
     X_train_scaled = scaler.fit_transform(X_train_reshaped).reshape(num_samples_train, num_timesteps, num_channels)
-
-    # Reshape and scale validation data
+    
     num_samples_valid = X_valid.shape[0]
     X_valid_scaled = scaler.transform(X_valid.reshape(-1, num_channels)).reshape(num_samples_valid, num_timesteps, num_channels)
-
-    # Reshape and scale test data
+    
     num_samples_test = X_test.shape[0]
     X_test_scaled = scaler.transform(X_test.reshape(-1, num_channels)).reshape(num_samples_test, num_timesteps, num_channels)
 
-    # Create TensorFlow datasets
-    train_dataset = tf.data.Dataset.from_tensor_slices((X_train_scaled, Y_train)).shuffle(buffer_size=1024).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    valid_dataset = tf.data.Dataset.from_tensor_slices((X_valid_scaled, Y_valid)).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    test_dataset = tf.data.Dataset.from_tensor_slices((X_test_scaled, Y_test)).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    # Create TensorFlow datasets with proper repeat for training
+    train_dataset = tf.data.Dataset.from_tensor_slices((X_train_scaled, Y_train))
+    train_dataset = train_dataset.shuffle(buffer_size=1024).batch(batch_size).repeat().prefetch(tf.data.AUTOTUNE)
+    
+    valid_dataset = tf.data.Dataset.from_tensor_slices((X_valid_scaled, Y_valid))
+    valid_dataset = valid_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    
+    test_dataset = tf.data.Dataset.from_tensor_slices((X_test_scaled, Y_test))
+    test_dataset = test_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
-    # Calculate steps using np.ceil to include all data
+    # Calculate steps using np.ceil
     steps_per_epoch = int(np.ceil(len(Y_train) / batch_size))
     validation_steps = int(np.ceil(len(Y_valid) / batch_size))
     test_steps = int(np.ceil(len(Y_test) / batch_size))
 
-    return train_dataset, valid_dataset, test_dataset, steps_per_epoch, validation_steps, test_steps, Y_test
+    return (train_dataset, valid_dataset, test_dataset, 
+            steps_per_epoch, validation_steps, test_steps, 
+            Y_test, class_weights)
 
 def ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal):
     """
@@ -386,7 +399,7 @@ def main():
                 data_entries.append(record_name)
 
     # Process the ECG records
-    peaks_per_signal = 10  # Adjust as needed
+    peaks_per_signal = 50  # Adjust as needed
     window_size = 300
     X, Y, diagnosis_counts = process_ecg_records(
         database_path=database_path,
