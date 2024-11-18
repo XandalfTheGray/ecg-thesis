@@ -60,19 +60,19 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         X, Y, batch_size=batch_size
     )
 
-    # Updated model parameters with increased complexity
+    # Updated model parameters - simplified architecture to start
     model_params = {
-        'head_size': 128,            # Increased from 64
-        'num_heads': 8,              # Increased from 4
-        'ff_dim': 256,              # Increased from 64
-        'num_transformer_blocks': 4,  # Increased from 2
-        'mlp_units': [256, 128],     # Changed from [64]
-        'mlp_dropout': 0.3,
-        'dropout': 0.2,              # Slightly reduced dropout
+        'head_size': 64,             # Reduced complexity
+        'num_heads': 4,              # Reduced complexity
+        'ff_dim': 128,              # Moderate size
+        'num_transformer_blocks': 2,  # Reduced complexity
+        'mlp_units': [128],          # Simplified MLP
+        'mlp_dropout': 0.2,          # Reduced dropout
+        'dropout': 0.1,              # Reduced dropout further
     }
 
-    # Increased initial learning rate
-    learning_rate = 1e-3  # Increased from 1e-4
+    # Adjust learning rate
+    learning_rate = 5e-4  # More conservative learning rate
 
     # Build model
     model = build_transformer(
@@ -82,10 +82,9 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         **model_params
     )
 
-    # Use AdamW optimizer with weight decay
-    optimizer = tf.keras.optimizers.AdamW(
+    # Use regular Adam optimizer initially
+    optimizer = tf.keras.optimizers.Adam(
         learning_rate=learning_rate,
-        weight_decay=0.001,          # L2 regularization
         beta_1=0.9,
         beta_2=0.999,
         epsilon=1e-7
@@ -104,19 +103,26 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         CustomProgressBar(),
         timing_callback,
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor='val_auc', mode='max',
-            factor=0.5, patience=5,    # Increased patience
-            min_lr=1e-6, verbose=1
+            monitor='val_auc', 
+            mode='max',
+            factor=0.2,              # More gradual reduction
+            patience=7,              # More patience
+            min_lr=1e-6, 
+            verbose=1
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor='val_auc', mode='max',
-            patience=15,               # Increased patience
-            restore_best_weights=True, verbose=1
+            monitor='val_auc', 
+            mode='max',
+            patience=20,             # More patience
+            restore_best_weights=True, 
+            verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, 'best_model.keras'),
-            monitor='val_auc', mode='max',
-            save_best_only=True, verbose=1
+            monitor='val_auc', 
+            mode='max',
+            save_best_only=True, 
+            verbose=1
         )
     ]
 
