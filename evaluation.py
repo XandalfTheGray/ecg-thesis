@@ -23,6 +23,8 @@ import logging
 import time
 from datetime import datetime
 from matplotlib.colors import ListedColormap
+import tensorflow as tf
+from tensorflow.keras.callbacks import Callback
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -72,47 +74,33 @@ def showConfusionMatrix(y_pred, y_true, filename, output_dir, label_names):
     plt.savefig(os.path.join(output_dir, filename))
     plt.close()
 
-class CustomProgressBar(keras.callbacks.Callback):
+class CustomProgressBar(Callback):
     """
     Custom callback to display progress bars during training.
     """
     def on_epoch_begin(self, epoch, logs=None):
         print(f"\nEpoch {epoch + 1}/{self.params['epochs']}")
         self.seen = 0
-        # Calculate total steps if not provided
-        if self.params.get('steps') is None:
-            try:
-                self.params['steps'] = self.params['samples'] // self.params['batch_size']
-            except KeyError:
-                # If we can't calculate steps, use the dataset length
-                self.params['steps'] = len(self.model.train_dataset)
-        
+
+        # Calculate total steps
         self.total_steps = self.params.get('steps', None)
         if self.total_steps is None:
-            # Compute total_steps if not provided
-            if 'samples' in self.params and 'batch_size' in self.params:
+            # Try to compute total_steps using 'samples' and 'batch_size'
+            if 'samples' in self.params and 'batch_size' in self.params and self.params['batch_size'] is not None:
                 self.total_steps = int(np.ceil(self.params['samples'] / self.params['batch_size']))
             else:
-                # Fallback to a default value or handle the error appropriately
-                self.total_steps = 0  # Or raise an exception
+                # Fallback to 0 if total_steps cannot be determined
+                self.total_steps = 0
 
         self.progbar = tf.keras.utils.Progbar(target=self.total_steps)
-        
+
     def on_batch_end(self, batch, logs=None):
         self.seen += 1
-        # Ensure we have valid total_batches
-        total_batches = self.params.get('steps', 0)
-        if total_batches > 0:  # Only show progress if we have valid total_batches
-            progress = int(50 * self.seen / total_batches)
-            bar = '=' * progress + '>' + ' ' * (50 - progress)
-            
-            # Create status line with metrics
-            status = f'\r{self.seen}/{total_batches} [{bar}] - '
-            for metric, value in logs.items():
-                status += f'{metric}: {value:.4f} '
-                
-            # Print status line and return to start of line
-            print(status, end='', flush=True)
+        # Ensure we have valid total_steps
+        if self.total_steps > 0:
+            # Update progress bar using Keras' built-in method
+            values = [(k, logs[k]) for k in self.params['metrics'] if k in logs]
+            self.progbar.update(self.seen, values=values)
 
 # ==============================
 # Multilabel Evaluation and Plotting Functions
