@@ -120,6 +120,9 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         )
     ]
 
+    # Convert class weights list to dictionary
+    class_weight_dict = {i: w for i, w in enumerate(class_weights)}
+
     # Train the model
     print("\nStarting model training...")
     training_start = time.time()
@@ -129,7 +132,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         epochs=50,                    # Increased from 30
         validation_data=valid_dataset,
         callbacks=callbacks,
-        class_weight=class_weights,
+        class_weight=class_weight_dict,
         verbose=0
     )
     
