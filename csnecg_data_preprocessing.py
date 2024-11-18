@@ -309,13 +309,7 @@ def prepare_data_for_training(X, Y, test_size=0.15, val_size=0.15, batch_size=12
     test_dataset = tf.data.Dataset.from_tensor_slices((X_test_scaled, Y_test))
     test_dataset = test_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
-    # Calculate steps
-    steps_per_epoch = len(X_train_scaled) // batch_size
-    validation_steps = len(X_valid_scaled) // batch_size
-    test_steps = len(X_test_scaled) // batch_size
-
     return (train_dataset, valid_dataset, test_dataset, 
-            steps_per_epoch, validation_steps, test_steps, 
             Y_test, class_weights)
 
 def ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal):

@@ -2,14 +2,17 @@
 
 import os
 import sys
-import tensorflow as tf
-import argparse
-import time
-import numpy as np
 
-# Suppress TensorFlow logs
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO and WARNING logs
-tf.get_logger().setLevel('ERROR')
+# Suppress TensorFlow logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress INFO and WARNING messages
+
+# Suppress absl logging
+stderr = sys.stderr
+sys.stderr = open(os.devnull, 'w')
+import absl.logging
+absl.logging.set_verbosity('error')
+import tensorflow as tf
+sys.stderr = stderr
 
 # Import your modules
 from models import build_resnet18_1d, build_resnet34_1d, build_resnet50_1d
@@ -121,7 +124,7 @@ def main(time_steps, batch_size, resnet_type, peaks_per_signal=1):
         validation_data=valid_dataset,
         callbacks=callbacks,
         class_weight=class_weight_dict,
-        verbose=1
+        verbose=0
     )
     
     training_end = time.time()
