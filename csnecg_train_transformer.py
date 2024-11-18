@@ -129,7 +129,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         epochs=50,                    # Increased from 30
         validation_data=valid_dataset,
         callbacks=callbacks,
-        class_weight=class_weight_dict,
+        class_weight=class_weights,
         verbose=0
     )
     
