@@ -2,7 +2,17 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import Counter
-from csnecg_data_preprocessing import load_data_numpy, ensure_data_available
+
+def load_npz_data(data_dir, peaks_per_signal):
+    """Load data directly from npz files"""
+    peaks_dir = os.path.join(data_dir, f'peaks_{peaks_per_signal}')
+    
+    # Load the npz files with allow_pickle=True
+    X = np.load(os.path.join(peaks_dir, 'X.npz'), allow_pickle=True)['arr_0']
+    Y = np.load(os.path.join(peaks_dir, 'Y.npz'), allow_pickle=True)['arr_0']
+    label_names = np.load(os.path.join(peaks_dir, 'label_names.npz'), allow_pickle=True)['arr_0']
+    
+    return X, Y, label_names
 
 def count_class_distribution(X, Y, label_names):
     """Count the number of samples in each class"""
@@ -87,26 +97,35 @@ def inspect_data(X, Y, label_names):
     print(f" - Min labels per sample: {label_counts.min()}")
 
 def main():
-    # Set up paths
-    base_path = '/content/drive/MyDrive/'  # Google Drive base path
-    drive_data_dir = os.path.join(base_path, 'csnecg_preprocessed_data')
+    # Set up paths for local data
     local_data_dir = 'csnecg_preprocessed_data'
-    peaks_per_signal = 10  # Adjust as needed
+    peaks_per_signal = 20  # Adjust as needed
     
-    # Ensure data is available locally
-    ensure_data_available(local_data_dir, drive_data_dir, peaks_per_signal)
+    # Construct the peaks directory path
+    peaks_dir = os.path.join(local_data_dir, f'peaks_{peaks_per_signal}')
     
-    # Load the data
-    X, Y, label_names = load_data_numpy(local_data_dir, peaks_per_signal)
+    # Check if the directory exists
+    if not os.path.exists(peaks_dir):
+        print(f"Data directory not found at {peaks_dir}")
+        print("Please ensure the data has been preprocessed first.")
+        return
     
-    # Inspect the data
-    inspect_data(X, Y, label_names)
-    
-    # Count and display class distribution
-    counts = count_class_distribution(X, Y, label_names)
-    
-    # Visualize samples
-    visualize_samples_by_class(X, Y, label_names, samples_per_class=10)
+    try:
+        # Load the data directly from npz files
+        X, Y, label_names = load_npz_data(local_data_dir, peaks_per_signal)
+        
+        # Inspect the data
+        inspect_data(X, Y, label_names)
+        
+        # Count and display class distribution
+        counts = count_class_distribution(X, Y, label_names)
+        
+        # Visualize samples
+        visualize_samples_by_class(X, Y, label_names, samples_per_class=10)
+        
+    except Exception as e:
+        print(f"Error loading or processing data: {str(e)}")
+        raise  # This will show the full error traceback
 
 if __name__ == '__main__':
     main() 

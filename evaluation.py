@@ -87,6 +87,17 @@ class CustomProgressBar(keras.callbacks.Callback):
                 # If we can't calculate steps, use the dataset length
                 self.params['steps'] = len(self.model.train_dataset)
         
+        self.total_steps = self.params.get('steps', None)
+        if self.total_steps is None:
+            # Compute total_steps if not provided
+            if 'samples' in self.params and 'batch_size' in self.params:
+                self.total_steps = int(np.ceil(self.params['samples'] / self.params['batch_size']))
+            else:
+                # Fallback to a default value or handle the error appropriately
+                self.total_steps = 0  # Or raise an exception
+
+        self.progbar = tf.keras.utils.Progbar(target=self.total_steps)
+        
     def on_batch_end(self, batch, logs=None):
         self.seen += 1
         # Ensure we have valid total_batches
