@@ -81,25 +81,24 @@ class CustomProgressBar(Callback):
     def on_epoch_begin(self, epoch, logs=None):
         print(f"\nEpoch {epoch + 1}/{self.params['epochs']}")
         self.seen = 0
-
-        # Calculate total steps
+        
+        # Get or calculate total steps
         self.total_steps = self.params.get('steps', None)
         if self.total_steps is None:
-            # Try to compute total_steps using 'samples' and 'batch_size'
             if 'samples' in self.params and 'batch_size' in self.params and self.params['batch_size'] is not None:
                 self.total_steps = int(np.ceil(self.params['samples'] / self.params['batch_size']))
             else:
-                # Fallback to 0 if total_steps cannot be determined
                 self.total_steps = 0
 
         self.progbar = tf.keras.utils.Progbar(target=self.total_steps)
 
     def on_batch_end(self, batch, logs=None):
+        logs = logs or {}
         self.seen += 1
-        # Ensure we have valid total_steps
+        
         if self.total_steps > 0:
-            # Update progress bar using Keras' built-in method
-            values = [(k, logs[k]) for k in self.params['metrics'] if k in logs]
+            # Get all available metrics from logs
+            values = [(k, v) for k, v in logs.items() if not k.startswith('val_')]
             self.progbar.update(self.seen, values=values)
 
 # ==============================
