@@ -399,7 +399,7 @@ def main():
                 data_entries.append(record_name)
 
     # Process the ECG records
-    peaks_per_signal = 50  # Adjust as needed
+    peaks_per_signal = 20  # Adjust as needed
     window_size = 300
     X, Y, diagnosis_counts = process_ecg_records(
         database_path=database_path,

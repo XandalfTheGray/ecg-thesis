@@ -152,20 +152,67 @@ def compute_metrics(y_true, y_pred, y_scores):
     
     return metrics_dict
 
-def plot_confusion_matrix_per_class(y_true, y_pred, label_names, output_dir):
+def plot_confusion_matrices_grid(y_true, y_pred, label_names, output_dir):
     """
-    Plots and saves a confusion matrix for each class in a multilabel setting.
+    Plots and saves confusion matrices for each class and the overall confusion matrix in a grid layout.
+    
+    Parameters:
+    - y_true (np.ndarray): True binary labels.
+    - y_pred (np.ndarray): Predicted binary labels.
+    - label_names (list): List of class names.
+    - output_dir (str): Directory to save the plot.
     """
+    num_classes = len(label_names)
+    fig_rows, fig_cols = 2, 3  # Adjust grid size as needed
+    fig, axes = plt.subplots(fig_rows, fig_cols, figsize=(18, 12))
+    axes = axes.ravel()
+
+    # Plot confusion matrices for each class
     for idx, label in enumerate(label_names):
         cm = confusion_matrix(y_true[:, idx], y_pred[:, idx])
-        plt.figure(figsize=(5, 4))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-        plt.title(f'Confusion Matrix for {label}')
-        plt.xlabel('Predicted')
-        plt.ylabel('Actual')
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f'confusion_matrix_{label}.png'))
-        plt.close()
+        ax = axes[idx]
+        sns.heatmap(cm, annot=True, fmt='d', cmap=ListedColormap(['white']),
+                    xticklabels=[f'Not {label}', label],
+                    yticklabels=[f'Not {label}', label],
+                    linewidths=0.5, linecolor='black', ax=ax)
+        ax.set_title(f'Confusion Matrix for {label}')
+        ax.set_xlabel('Predicted')
+        ax.set_ylabel('Actual')
+        # Add outer border
+        for _, spine in ax.spines.items():
+            spine.set_visible(True)
+            spine.set_linewidth(0.5)
+            spine.set_color('black')
+
+    # Plot overall confusion matrix in the last subplot
+    cm_total = np.zeros((2, 2), dtype=int)
+    for idx in range(num_classes):
+        cm = confusion_matrix(y_true[:, idx], y_pred[:, idx])
+        cm_total += cm
+
+    ax = axes[-1]
+    sns.heatmap(cm_total, annot=True, fmt='d', cmap=ListedColormap(['white']),
+                xticklabels=['Negative', 'Positive'],
+                yticklabels=['Negative', 'Positive'],
+                linewidths=0.5, linecolor='black', ax=ax)
+    ax.set_title('Overall Confusion Matrix')
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Actual')
+    # Add outer border
+    for _, spine in ax.spines.items():
+        spine.set_visible(True)
+        spine.set_linewidth(0.5)
+        spine.set_color('black')
+
+    # Hide any unused subplots
+    total_plots = fig_rows * fig_cols
+    if num_classes < total_plots - 1:
+        for i in range(num_classes, total_plots - 1):
+            fig.delaxes(axes[i])
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'confusion_matrices_grid.png'))
+    plt.close()
 
 def plot_precision_recall_per_class(y_true, y_scores, label_names, output_dir):
     """
@@ -284,25 +331,6 @@ def plot_label_distribution(y_true, label_names, output_dir):
     plt.savefig(os.path.join(output_dir, 'label_distribution.png'))
     plt.close()
 
-def plot_confusion_matrix_overall(y_true, y_pred, label_names, output_dir):
-    """
-    Plots and saves an overall confusion matrix aggregated across all classes.
-    """
-    # Initialize cm_total as an integer array to prevent float accumulation
-    cm_total = np.zeros((2, 2), dtype=int)
-    for idx in range(y_true.shape[1]):
-        cm = confusion_matrix(y_true[:, idx], y_pred[:, idx])
-        cm_total += cm
-    
-    plt.figure(figsize=(5, 4))
-    sns.heatmap(cm_total, annot=True, fmt='d', cmap='Blues')
-    plt.title('Overall Confusion Matrix')
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'overall_confusion_matrix.png'))
-    plt.close()
-
 def plot_training_history(history, output_dir):
     """Plot and save the training and validation loss and accuracy."""
     plt.figure(figsize=(12, 4))
@@ -363,7 +391,8 @@ def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir,
             f.write(f"{metric}: {value:.4f}\n")
     
     # Generate individual plots
-    plot_confusion_matrix_per_class(y_true, y_pred, label_names, output_dir)
+    # plot_confusion_matrix_per_class(y_true, y_pred, label_names, output_dir)
+    plot_confusion_matrices_grid(y_true, y_pred, label_names, output_dir)
     plot_precision_recall_per_class(y_true, y_scores, label_names, output_dir)
     plot_roc_curve_per_class(y_true, y_scores, label_names, output_dir)
     
@@ -374,7 +403,6 @@ def evaluate_multilabel_model(y_true, y_pred, y_scores, label_names, output_dir,
     # Generate additional visualizations
     plot_metrics_bar_chart(y_true, y_pred, label_names, output_dir)
     plot_label_distribution(y_true, label_names, output_dir)
-    plot_confusion_matrix_overall(y_true, y_pred, label_names, output_dir)
     
     # Plot training history if history is provided
     if history is not None:
