@@ -112,7 +112,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     
     history = model.fit(
         train_dataset,
-        epochs=30,
+        epochs=50,
         validation_data=valid_dataset,
         callbacks=callbacks,
         class_weight=class_weight_dict,
