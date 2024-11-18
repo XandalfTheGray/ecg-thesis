@@ -7,6 +7,10 @@ import argparse
 import time
 import numpy as np
 
+# Suppress TensorFlow logs
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO and WARNING logs
+tf.get_logger().setLevel('ERROR')
+
 # Import your modules
 from models import build_cnn
 from evaluation import (
@@ -104,9 +108,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     history = model.fit(
         train_dataset,
         epochs=30,
-        steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
-        validation_steps=validation_steps,
         callbacks=callbacks,
         class_weight=class_weight_dict,
         verbose=1

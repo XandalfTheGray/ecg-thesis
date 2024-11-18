@@ -7,6 +7,10 @@ import argparse
 import time
 import numpy as np
 
+# Suppress TensorFlow logs
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO and WARNING logs
+tf.get_logger().setLevel('ERROR')
+
 # Import your modules
 from models import build_transformer
 from evaluation import (
@@ -51,18 +55,19 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         X, Y, batch_size=batch_size
     )
 
-    # Define model parameters with increased capacity
+    # Define model parameters with reduced complexity
     model_params = {
-        'head_size': 128,        # Increased from 64
-        'num_heads': 8,          # Increased from 4
-        'ff_dim': 64,           # Increased from 32
-        'num_transformer_blocks': 4,  # Increased from 2
-        'mlp_units': [128, 64],  # Added another layer
+        'head_size': 64,         # Reduced from 128
+        'num_heads': 4,          # Reduced from 8
+        'ff_dim': 64,           
+        'num_transformer_blocks': 2,  # Reduced from 4
+        'mlp_units': [64],       # Simplified MLP
         'mlp_dropout': 0.3,
         'dropout': 0.25,
     }
 
-    learning_rate = 1e-4
+    # Increased initial learning rate
+    learning_rate = 1e-3  # Increased from 1e-4
 
     # Build and compile model with class weights
     model = build_transformer(
@@ -76,7 +81,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     class_weight_dict = {i: w for i, w in enumerate(class_weights)}
     model.compile(
         loss='binary_crossentropy',
-        optimizer=tf.keras.optimizers.Adam(1e-4),
+        optimizer=tf.keras.optimizers.Adam(learning_rate),
         metrics=['accuracy', tf.keras.metrics.AUC(name='auc')]
     )
 
@@ -86,26 +91,26 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         CustomProgressBar(),
         timing_callback,
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor='val_auc',  # Changed from val_loss
+            monitor='val_auc',
             factor=0.5,
             patience=3,
             min_lr=1e-6,
             verbose=1,
-            mode='max'  # Changed to max for AUC
+            mode='max'
         ),
         tf.keras.callbacks.EarlyStopping(
-            monitor='val_auc',  # Changed from val_loss
+            monitor='val_auc',
             patience=10,
             restore_best_weights=True,
             verbose=1,
-            mode='max'  # Changed to max for AUC
+            mode='max'
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, 'best_model.keras'),
-            monitor='val_auc',  # Changed from val_loss
+            monitor='val_auc',
             save_best_only=True,
             verbose=1,
-            mode='max'  # Changed to max for AUC
+            mode='max'
         )
     ]
 
@@ -116,9 +121,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
     history = model.fit(
         train_dataset,
         epochs=30,
-        steps_per_epoch=steps_per_epoch,
         validation_data=valid_dataset,
-        validation_steps=validation_steps,
         callbacks=callbacks,
         class_weight=class_weight_dict,
         verbose=1
