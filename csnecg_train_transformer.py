@@ -113,7 +113,7 @@ def main(time_steps, batch_size, peaks_per_signal=1):
         tf.keras.callbacks.EarlyStopping(
             monitor='val_auc', 
             mode='max',
-            patience=20,             # More patience
+            patience=10,             # More patience
             restore_best_weights=True, 
             verbose=1
         ),

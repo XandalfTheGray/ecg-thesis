@@ -69,9 +69,10 @@ def segmentSignal(record, valid_labels, label2Num):
     cl_Labels = []
     classes = []
 
-    # iterate through all rPeaks. If the label is not valid, skip that peak
+    # Set random seed before downsampling
+    np.random.seed(42)
+    
     for peakNum in range(1,len(rPeaks)):
-
         if labels[peakNum] not in valid_labels:
             continue
 
@@ -81,7 +82,7 @@ def segmentSignal(record, valid_labels, label2Num):
         if ((lowerBound < 0) or (upperBound > len(signal))):
             continue
 
-        # Randomly undersample from all Normal heartbeats
+        # Undersample Normal heartbeats with fixed seed
         if labels[peakNum] == 'N':
             if np.random.uniform(0,1) < 0.85:
                 continue
@@ -92,7 +93,6 @@ def segmentSignal(record, valid_labels, label2Num):
         # Fix the corresponding labels to the data
         newSignal.append(QRS_Complex)
         cl_Labels.append(label2Num[labels[peakNum]])
-
         classes.append(labels[peakNum])
 
     return newSignal, cl_Labels, classes
@@ -118,12 +118,16 @@ def create_nn_labels(y_cl, num_classes):
 def load_mitbih_data(data_entries, valid_labels, database_path):
     label2Num = {label: idx for idx, label in enumerate(valid_labels)}
     Num2Label = {idx: label for idx, label in enumerate(valid_labels)}
+    print("Label mapping:", label2Num)
+    
     print(f"Processing {len(data_entries)} records for MITBIH dataset")
     X, Y_cl = [], []
     for record in data_entries:
         ecg_reading = processRecord(record, database_path)
         if ecg_reading is not None:
-            segments, labels, _ = segmentSignal(ecg_reading, valid_labels, label2Num)
+            segments, labels, classes = segmentSignal(ecg_reading, valid_labels, label2Num)
+            if segments:
+                print(f"Record {record} class distribution:", Counter(classes))
             X.extend(segments)
             Y_cl.extend(labels)
         else:
@@ -134,7 +138,9 @@ def filter_and_remap_classes(X, Y_cl, min_samples_per_class=10):
     class_counts = Counter(Y_cl)
     print("Initial class distribution:", dict(class_counts))
 
-    valid_classes = [cls for cls, count in class_counts.items() if count >= min_samples_per_class]
+    # Filter out classes with fewer than min_samples_per_class samples
+    valid_classes = [cls for cls, count in class_counts.items() 
+                    if count >= min_samples_per_class]
     mask = np.isin(Y_cl, valid_classes)
     X = X[mask]
     Y_cl = Y_cl[mask]
@@ -142,6 +148,7 @@ def filter_and_remap_classes(X, Y_cl, min_samples_per_class=10):
     print(f"Filtered data shape - X: {X.shape}, Y_cl: {Y_cl.shape}")
     print("Filtered class distribution:", dict(Counter(Y_cl)))
 
+    # Remap classes to consecutive integers starting from 0
     unique_labels = sorted(set(Y_cl))
     label_map = {label: i for i, label in enumerate(unique_labels)}
     Y_cl = np.array([label_map[y] for y in Y_cl])
@@ -156,13 +163,18 @@ def scale_data(X):
     X_scaled = scaler.fit_transform(X_reshaped)
     return X_scaled.reshape(num_samples, num_timesteps, num_channels)
 
-def split_data(X, Y, test_size=0.2, val_size=0.25):
+def split_data(X, Y, test_size=0.10, val_size=0.10):
+    """Split data into train, validation, and test sets using rd_cnn_mitbih.py ratios."""
+    # First split: 90% train+val, 10% test (random_state=12)
     X_train, X_test, y_train, y_test = train_test_split(
-        X, Y, test_size=test_size, random_state=42, stratify=Y
+        X, Y, test_size=test_size, random_state=12, stratify=Y
     )
+    
+    # Second split: 90% train, 10% validation (random_state=87)
     X_train, X_valid, y_train, y_valid = train_test_split(
-        X_train, y_train, test_size=val_size, random_state=42, stratify=y_train
+        X_train, y_train, test_size=val_size, random_state=87, stratify=y_train
     )
+    
     return X_train, X_valid, X_test, y_train, y_valid, y_test
 
 def prepare_mitbih_data(data_entries, valid_labels, database_path, min_samples_per_class=10):
@@ -186,3 +198,4 @@ def prepare_mitbih_data(data_entries, valid_labels, database_path, min_samples_p
     print(f"Test set shape: {X_test.shape}, {y_test.shape}")
     
     return X_train, X_valid, X_test, y_train, y_valid, y_test, num_classes, Num2Label
+

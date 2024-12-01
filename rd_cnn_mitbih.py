@@ -127,6 +127,9 @@ def segmentSignal(record, valid_labels, label2Num, preBuffer=150, postBuffer=150
     cl_Labels = []
     classes = []
     
+    # Set random seed before downsampling
+    np.random.seed(42)
+    
     for peakNum in range(len(rPeaks)):
         if labels[peakNum] not in valid_labels:
             continue
@@ -136,7 +139,7 @@ def segmentSignal(record, valid_labels, label2Num, preBuffer=150, postBuffer=150
         if lowerBound < 0 or upperBound > len(signal):
             continue
         
-        # Undersample Normal heartbeats to balance dataset
+        # Undersample Normal heartbeats with fixed seed
         if labels[peakNum] == 'N':
             if np.random.uniform(0, 1) < 0.85:
                 continue

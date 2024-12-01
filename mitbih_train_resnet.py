@@ -27,7 +27,7 @@ def main():
     # Setup
     base_output_dir = 'output_plots'
     dataset_name = 'mitbih'
-    model_type = 'resnet18'  # Change this to 'resnet34' or 'resnet50' as needed
+    model_type = 'resnet50'  # 'resnet18', 'resnet34', or 'resnet50'
 
     # Create a unique directory name with dataset and model
     output_dir = os.path.join(base_output_dir, f"{dataset_name}_{model_type}")

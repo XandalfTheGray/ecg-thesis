@@ -60,7 +60,7 @@ def showConfusionMatrix(y_pred, y_true, filename, output_dir, label_names):
     ax = plt.gca()
     sns.heatmap(cm, annot=True, fmt='d', cmap=ListedColormap(['white']),
                 xticklabels=label_names, yticklabels=label_names,
-                linewidths=0.5, linecolor='black')
+                linewidths=0.5, linecolor='black', cbar=False)
     # Add outer border
     for _, spine in ax.spines.items():
         spine.set_visible(True)
@@ -172,7 +172,7 @@ def plot_confusion_matrices_grid(y_true, y_pred, label_names, output_dir):
         sns.heatmap(cm, annot=True, fmt='d', cmap=ListedColormap(['white']),
                     xticklabels=[f'Not {label}', label],
                     yticklabels=[f'Not {label}', label],
-                    linewidths=0.5, linecolor='black', ax=ax)
+                    linewidths=0.5, linecolor='black', ax=ax, cbar=False)
         ax.set_title(f'Confusion Matrix for {label}')
         ax.set_xlabel('Predicted')
         ax.set_ylabel('Actual')
@@ -455,3 +455,15 @@ def log_timing_info(timing_callback, model_info, output_dir):
         f.write("Per-Epoch Timing:\n")
         for epoch, time_taken in enumerate(timing_callback.times, 1):
             f.write(f"Epoch {epoch}: {time_taken:.2f} seconds\n")
+
+def print_detailed_stats(y_pred, y_true):
+    """Print detailed classification metrics."""
+    accuracy = np.mean(y_pred == y_true)
+    precision = precision_score(y_true, y_pred, average='weighted')
+    recall = recall_score(y_true, y_pred, average='weighted')
+    f1 = f1_score(y_true, y_pred, average='weighted')
+    
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1-score: {f1:.4f}")
